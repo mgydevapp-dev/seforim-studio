@@ -1,16 +1,29 @@
-# Optional: if you put this folder on GitHub, every push builds SeforimStudio-Portable.zip automatically
-# (download it from the Actions tab -> latest run -> Artifacts).
+# Every push builds SeforimStudio-Portable.zip (download from the Actions tab -> latest run -> Artifacts).
 name: Build portable Windows exe
 on: [push, workflow_dispatch]
 jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build
         shell: pwsh
         run: ./build_portable.ps1
-      - uses: actions/upload-artifact@v4
+      - name: Smoke test (start the exe, check it answers)
+        shell: pwsh
+        run: |
+          $p = Start-Process "SeforimStudio-Portable\SeforimStudio.exe" -ArgumentList "--no-window","--port","8799" -PassThru
+          Start-Sleep -Seconds 12
+          $r = Invoke-WebRequest "http://127.0.0.1:8799/" -UseBasicParsing
+          if ($r.Content -notmatch "Seforim Studio") { throw "app did not answer" }
+          Write-Host "App answered OK ($($r.Content.Length) bytes)"
+          $t = $r.Content | Select-String 'TOKEN = "([^"]+)"' | % { $_.Matches[0].Groups[1].Value }
+          $s = Invoke-RestMethod "http://127.0.0.1:8799/api/scan_engines" -Method Post -Body "{}" -Headers @{"X-Token"=$t}
+          $s | Format-Table key, ok, info -AutoSize | Out-String | Write-Host
+          $g = Invoke-RestMethod "http://127.0.0.1:8799/api/gematria_value" -Method Post -Body '{"text":"שלום"}' -ContentType "application/json; charset=utf-8" -Headers @{"X-Token"=$t}
+          Write-Host "Gematria check: $($g.methods.'Standard (Mispar Hechrachi)')"
+          Stop-Process -Id $p.Id -Force
+      - uses: actions/upload-artifact@v5
         with:
           name: SeforimStudio-Portable
           path: SeforimStudio-Portable.zip

@@ -65,11 +65,23 @@ try {
     $tsExe = Join-Path $Work "tesseract-setup.exe"
     if (-not (Test-Path $tsExe)) { Invoke-WebRequest $TessUrl -OutFile $tsExe }
     $tsDir = Join-Path $Out "tesseract"
-    Write-Host "     (Windows may ask permission - click Yes)"
-    Start-Process $tsExe -Wait -ArgumentList "/S /D=$tsDir"   # NSIS: /D must be last and unquoted
+    $7z = @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if ($7z) {
+        # unpack the installer directly (no install, no admin rights needed)
+        & $7z x $tsExe "-o$tsDir" -y | Out-Null
+        Remove-Item "$tsDir\`$PLUGINSDIR" -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item "$tsDir\tesseract-uninstall.exe" -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Test-Path "$tsDir\tesseract.exe")) {
+        Write-Host "     (Windows may ask permission - click Yes)"
+        Start-Process $tsExe -Wait -ArgumentList "/S /D=$tsDir"   # NSIS: /D must be last and unquoted
+        Start-Sleep -Seconds 5
+    }
     if (-not (Test-Path "$tsDir\tesseract.exe")) { throw "not installed" }
+    New-Item -ItemType Directory -Force -Path "$tsDir\tessdata" | Out-Null
     Invoke-WebRequest $HebUrl -OutFile "$tsDir\tessdata\heb.traineddata"
-    Write-Host "     Tesseract + Hebrew added." -ForegroundColor Green
+    $langs = & "$tsDir\tesseract.exe" --list-langs 2>&1
+    Write-Host "     Tesseract + Hebrew added. Languages: $($langs -join ' ')" -ForegroundColor Green
 } catch {
     Write-Host "     Could not add Tesseract automatically ($_). The app still works; install Tesseract later (see README)." -ForegroundColor Yellow
 }
