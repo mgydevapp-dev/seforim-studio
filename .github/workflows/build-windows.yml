@@ -1,6 +1,8 @@
 # Every push builds SeforimStudio-Portable.zip (download from the Actions tab -> latest run -> Artifacts).
 name: Build portable Windows exe
 on: [push, workflow_dispatch]
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: windows-latest
@@ -27,3 +29,11 @@ jobs:
         with:
           name: SeforimStudio-Portable
           path: SeforimStudio-Portable.zip
+      - name: Publish as a Release (easy download page)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>$null; $global:LASTEXITCODE = 0
+          $notes = "Portable Seforim Studio for Windows 10/11. Download SeforimStudio-Portable.zip, unzip, read 'START HERE.txt', double-click SeforimStudio.exe. Built from commit ${{ github.sha }}."
+          gh release create latest SeforimStudio-Portable.zip --title "Seforim Studio - portable Windows app" --notes "$notes" --target ${{ github.sha }}
