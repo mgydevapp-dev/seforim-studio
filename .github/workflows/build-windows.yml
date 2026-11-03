@@ -1,0 +1,16 @@
+# Optional: if you put this folder on GitHub, every push builds SeforimStudio-Portable.zip automatically
+# (download it from the Actions tab -> latest run -> Artifacts).
+name: Build portable Windows exe
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: pwsh
+        run: ./build_portable.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SeforimStudio-Portable
+          path: SeforimStudio-Portable.zip

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seforim Studio</title>
+<link rel="stylesheet" href="/web/style.css">
+<link rel="icon" href="/web/icon.svg">
+<script>window.TOKEN = "__TOKEN__";</script>
+</head>
+<body>
+<div id="app">
+  <nav id="rail"></nav>
+  <div id="main">
+    <header id="topbar">
+      <div class="brand" title="Seforim Studio"><span class="logo">ס</span><span class="brand-name">Seforim Studio</span></div>
+      <div class="quick">
+        <input id="quick" class="heb-ok" placeholder="Quick search or go to (e.g. Genesis 1:1, בראשית, אור)…" autocomplete="off">
+      </div>
+      <div class="top-actions">
+        <button id="kbToggle" class="chip" title="Type Hebrew with an English keyboard (Ctrl+Shift+K)">⌨ EN → עב</button>
+        <button id="oskBtn" class="icon-btn" title="On-screen Hebrew keyboard">א</button>
+        <button id="clipBtn" class="icon-btn" title="Clipboard catcher (gather snippets)">📋</button>
+        <button id="focusBtn" class="icon-btn" title="Focus mode (F11 style)">⛶</button>
+        <select id="themeSel" title="Theme"><option value="light">☀ Light</option><option value="sepia">📜 Sepia</option><option value="gray">◐ Gray</option><option value="dark">☾ Dark</option><option value="auto">⏱ Auto (zmanim)</option></select>
+        <select id="langSel" title="Interface language"><option value="en">English</option><option value="he">עברית</option><option value="fr">Français</option></select>
+        <button id="profileBtn" class="chip" title="Profile (each family member keeps separate notes & bookmarks)">👤 <span id="profileName">Default</span></button>
+      </div>
+    </header>
+    <section id="pages"></section>
+    <footer id="statusbar"><span id="status-left"></span><span id="status-right"></span></footer>
+  </div>
+</div>
+<div id="osk" class="hidden"></div>
+<div id="clipCatcher" class="hidden"></div>
+<div id="toasts"></div>
+<div id="modalWrap" class="hidden"><div id="modal"></div></div>
+<script src="/web/js/core.js"></script>
+<script src="/web/js/home.js"></script>
+<script src="/web/js/library.js"></script>
+<script src="/web/js/search.js"></script>
+<script src="/web/js/gematria.js"></script>
+<script src="/web/js/analysis.js"></script>
+<script src="/web/js/tools.js"></script>
+<script src="/web/js/notes.js"></script>
+<script src="/web/js/personal.js"></script>
+<script src="/web/js/cover.js"></script>
+<script src="/web/js/scanner.js"></script>
+<script src="/web/js/share.js"></script>
+<script src="/web/js/settings.js"></script>
+<script>App.start();</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+_build/
+build/
+dist/
+SeforimStudio-Portable/
+SeforimStudio-Portable.zip
+data/*
+!data/seforim_catalog.db
