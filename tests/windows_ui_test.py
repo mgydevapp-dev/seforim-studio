@@ -15,6 +15,8 @@ import time
 import traceback
 import urllib.request
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 EXE, OUT = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[2])
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = 8799

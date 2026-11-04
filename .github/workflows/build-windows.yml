@@ -36,6 +36,7 @@ jobs:
           $data = Join-Path $env:RUNNER_TEMP "testdata"
           Copy-Item "SeforimStudio-Portable\data" $data -Recurse
           $env:TEST_DATA = $data
+          $env:PYTHONIOENCODING = "utf-8"
           & $py tests\windows_ui_test.py "SeforimStudio-Portable\SeforimStudio.exe" "ci-results"
           if ($LASTEXITCODE -ne 0) { throw "some checks failed - see ci-results/report.md" }
 
@@ -43,7 +44,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if (-not (Test-Path ci-results)) { New-Item -ItemType Directory ci-results | Out-Null; "no results" | Set-Content ci-results\report.md }
+          New-Item -ItemType Directory ci-results -Force | Out-Null
+          if (-not (Test-Path ci-results\report.md)) { "The test did not finish - see the build log." | Set-Content ci-results\report.md }
+          "${{ github.sha }} $(Get-Date -Format o)" | Set-Content ci-results\built.txt
           $d = Join-Path $env:RUNNER_TEMP "results"
           New-Item -ItemType Directory $d -Force | Out-Null
           Copy-Item ci-results\* $d -Recurse -Force
@@ -51,6 +54,7 @@ jobs:
           git init -q -b ci-results
           git config user.name "build-bot"; git config user.email "build-bot@users.noreply.github.com"
           git add -A; git commit -q -m "Test results for ${{ github.sha }}"
+          if ($LASTEXITCODE -ne 0) { throw "commit failed" }
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-results
           Pop-Location
 

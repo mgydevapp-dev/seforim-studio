@@ -16,7 +16,17 @@ BASE = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.abspath(__file_
 HOME = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 sys.path.insert(0, BASE)
 
-from core.server import App, serve  # noqa: E402
+try:
+    from core.server import App, serve  # noqa: E402
+except ModuleNotFoundError as _e:  # running from source without the add-ons installed
+    _msg = (f"Seforim Studio is missing a part: {_e.name}\n\nRun install_windows.bat once (needs internet), "
+            "or use the portable SeforimStudio.exe which has everything inside.")
+    try:
+        import ctypes
+        ctypes.windll.user32.MessageBoxW(0, _msg, "Seforim Studio", 0x10)
+    except Exception:
+        print(_msg)
+    sys.exit(1)
 
 
 def find_browser():
