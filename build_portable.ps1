@@ -86,6 +86,20 @@ try {
     Write-Host "     Could not add Tesseract automatically ($_). The app still works; install Tesseract later (see README)." -ForegroundColor Yellow
 }
 
+# 4b. Pre-download Hebrew titles and the Hebrew font pack into the portable folder
+Step "4b   Adding exact Hebrew titles (6,600 seforim) and 50+ Hebrew fonts"
+New-Item -ItemType Directory -Force -Path "$Out\data\fonts" | Out-Null
+Copy-Item (Join-Path $Root "data\seforim_catalog.db") "$Out\data\seforim_catalog.db" -Force
+try {
+    & $Py (Join-Path $Root "tools\prebuild_library.py") --out "$Out\data\library.sqlite" --titles-only --workers 16
+    if ($LASTEXITCODE -ne 0) { throw "titles failed" }
+    Remove-Item "$Out\data\library_report.txt" -Force -ErrorAction SilentlyContinue
+} catch { Write-Host "     Could not add Hebrew titles now ($_). They can be downloaded later in Settings." -ForegroundColor Yellow }
+try {
+    $fontsDir = "$Out\data\fonts"
+    & $Py -c "import sys; sys.path.insert(0, r'$Root'); from core.fonts import download_font_pack; r = download_font_pack(r'$fontsDir'); print('fonts:', len(r['downloaded']), 'failed:', r['failed'])"
+} catch { Write-Host "     Could not add fonts now ($_). They can be downloaded later in Settings." -ForegroundColor Yellow }
+
 # 5. Extras
 Step "5/5  Finishing"
 Copy-Item (Join-Path $Root "README.md") $Out -Force
@@ -95,14 +109,15 @@ SEFORIM STUDIO - PORTABLE
 =========================
 Double-click SeforimStudio.exe.  Nothing to install.  Works with no internet.
 
-BEFORE moving this folder to the OFFLINE computer (do this on a computer WITH internet):
-  1. Open SeforimStudio.exe
-  2. Settings -> Library & download: tick the sections you want -> "Download & build library"
-  3. Settings -> "Get exact Hebrew titles for all seforim"
-  4. Settings -> Fonts -> "Download the free Hebrew font pack"
-  5. Close the app.
+Already included: Hebrew titles of all seforim, 50+ Hebrew fonts, Tesseract Hebrew reader for the scanner.
+
+THE TEXTS (the full library of all seforim, Hebrew + English, with all cross-references):
+  Download the file(s) named  SeforimLibrary.sqlite.xz.part1of?, part2of?...  from the same download page,
+  put them in THIS folder (next to SeforimStudio.exe), and start SeforimStudio.exe.
+  It installs the library once (a few minutes) and then you can delete those downloaded part files.
+
 Then copy this WHOLE folder (SeforimStudio-Portable) to a USB stick / external drive and onto the offline computer.
-Everything you downloaded is inside the "data" folder and travels with it.
+Everything is inside the "data" folder and travels with it.
 
 Optional AI handwriting reader (engine A): install Ollama on the offline computer (copy the installer on the USB),
 and copy the model folder %USERPROFILE%\.ollama\models from a computer where you ran:  ollama pull qwen3-vl:8b

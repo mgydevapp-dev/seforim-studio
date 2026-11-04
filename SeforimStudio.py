@@ -71,7 +71,7 @@ def main():
     browser = find_browser()
     if browser:
         prof = os.path.join(a.data, "window_profile")
-        proc = subprocess.Popen([browser, f"--app={url}", f"--user-data-dir={prof}", "--window-size=1440,920",
+        proc = subprocess.Popen(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, args=[browser, f"--app={url}", f"--user-data-dir={prof}", "--window-size=1440,920",
                                  "--no-first-run", "--no-default-browser-check", "--disable-features=Translate",
                                  "--lang=en-US"])
         proc.wait()  # app window closed → quit

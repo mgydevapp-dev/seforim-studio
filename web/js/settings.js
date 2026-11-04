@@ -16,6 +16,9 @@ const Settings = {
         ${st.catalog ? `<p>Loaded: <b>${st.catalog.works.toLocaleString()}</b> works · ${st.catalog.texts.toLocaleString()} text versions · ${st.catalog.categories.toLocaleString()} categories<br><span class="small muted">${esc(st.catalog.path)} · export ${esc(st.catalog.generated_at)}</span></p>` : "<p class='muted'>No catalog loaded.</p>"}
         <button class="btn" id="stCat">Load a different catalog .db…</button>
         <h2>Your offline library</h2><p><b>${st.library.works}</b> seforim · <b>${st.library.passages.toLocaleString()}</b> passages · ${st.library.words.toLocaleString()} distinct words · ${st.library.links.toLocaleString()} cross-references · ${st.library.size_mb} MB</p>
+        <h2>Pre-built full library</h2><p class="small">Downloaded <b>SeforimLibrary.sqlite.xz</b> (or its parts)? Put the file(s) in this app's folder or leave them in Downloads, then press the button. Your own notes and seforim are kept.</p>
+        <div class="row"><input id="stInstDir" placeholder="(optional) folder where the download is" style="flex:1"><button class="btn primary" id="stInst">📥 Install library download</button></div>
+        <p class="small" id="stInstMsg">${st.install && st.install.message ? esc(st.install.message) : ""}</p>
         <h2>Hebrew names of seforim</h2><p class="small" id="stHe">…</p>
         <div class="row"><button class="btn" id="stHeDl" title="Downloads ~116 MB once: exact Hebrew title, author and date of every sefer">⬇ Get exact Hebrew titles for all seforim (one time)</button></div>
         <div class="row" style="margin-top:8px"><button class="btn" id="stCompact">Compact database</button><button class="btn" id="stFolder">Import from a Sefaria export folder (USB)…</button><button class="btn" id="stOpen">📂 Data folder</button></div></div>
@@ -27,6 +30,11 @@ const Settings = {
         <div class="progress" style="margin-top:8px"><div id="dlBar"></div></div><div class="small" id="dlStat"></div></div></div>`;
     $("#stCat").onclick = async () => { const u = await App.uploadPicked(".db,.sqlite,.sqlite3", false); if (!u.length) return; const r = await App.api("load_catalog", { upload: u[0].upload }); App.toast(`Catalog loaded: ${r.works} works`); Library.loadTree(); this.tab("library"); };
     App.api("he_coverage").then(c => { if (c.works) $("#stHe").innerHTML = `<b>${c.with_hebrew.toLocaleString()}</b> of ${c.works.toLocaleString()} seforim already show their Hebrew name (built-in dictionary${c.official ? ` + ${c.official.toLocaleString()} official titles` : ""}). The one-time download below makes every title exact and adds authors & dates.`; });
+    $("#stInst").onclick = async () => {
+      const r = await App.api("install_check", { folder: $("#stInstDir").value.trim() || null });
+      if (r.state === "running") return App.waitInstall();
+      $("#stInstMsg").textContent = r.message || (r.state === "idle" ? "No library download found. Looked in this app's folder, its data folder, Downloads and Desktop." : "Already installed.");
+    };
     $("#stHeDl").onclick = async () => { const r = await App.api("dl_titles"); if (r.started) { App.toast("Downloading Hebrew titles…"); this.poll(); } else App.toast("Another download is running — try again when it finishes"); };
     $("#stCompact").onclick = async () => { App.toast("Compacting…"); const r = await App.api("compact"); App.toast(`Done — ${r.size_mb} MB`); };
     $("#stOpen").onclick = () => App.api("open_folder", {});

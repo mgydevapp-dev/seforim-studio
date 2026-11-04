@@ -20,6 +20,7 @@ from . import formats as F
 from . import hcalendar as C
 from . import hebrew as H
 from . import tools as TL
+from . import winproc
 from .catalog import Catalog, Downloader
 from .data_tables import PARSHIYOS, HOLIDAY_TEXTS, PLACES, ERAS
 from .library import Library
@@ -72,13 +73,72 @@ class App:
         self.lib = Library(os.path.join(self.data, "library.sqlite"))
         self.user = UserData(os.path.join(self.data, "profiles"), self._last_profile())
         self.catalog = None
-        cat_path = self.user.get_setting("catalog_path") or os.path.join(self.data, "seforim_catalog.db")
-        if os.path.exists(cat_path):
-            self.load_catalog(cat_path)
+        # Prefer the catalog inside the data folder, so the portable folder can be moved to another computer.
+        for cat_path in (os.path.join(self.data, "seforim_catalog.db"), self.user.get_setting("catalog_path") or ""):
+            if cat_path and os.path.exists(cat_path):
+                try:
+                    self.load_catalog(cat_path)
+                    break
+                except Exception as e:  # noqa
+                    print("catalog problem:", e)
         self.share = ShareHub(os.path.join(self.data, "inbox"))
         self.share_server = None
         self.last_ping = time.time()
         self._load_plugins()
+        self.install = {"state": "idle", "progress": 0, "message": ""}
+        self.check_library_install()
+
+    # ------------------------------------------------------------------ pre-built library install
+    def check_library_install(self, extra_dir=None):
+        from . import installer
+        app_dir = os.path.dirname(self.data)
+        parts, expected = installer.find_parts(installer.search_dirs(app_dir, self.data, extra_dir))
+        if not parts:
+            if expected:
+                self.install.update(state="incomplete", message=f"Found only some parts of the library download (need all {expected}).")
+            return self.install
+        if installer.already_installed(self.data, parts) or self.install["state"] == "running":
+            return self.install
+        self.install.update(state="running", progress=0, message="Installing the seforim library (one time)…",
+                            files=[os.path.basename(p) for p in parts])
+
+        def run():
+            path = os.path.join(self.data, "library.sqlite")
+            tmp = path + ".installing"
+            try:
+                for f in (tmp, tmp + "-wal", tmp + "-shm"):
+                    if os.path.exists(f):
+                        os.remove(f)
+                n = installer.decompress(parts, tmp, lambda x: self.install.update(progress=round(x * 95, 1)))
+                self.install.update(progress=96, message="Keeping the seforim you added yourself…")
+                new_lib = Library(tmp)
+                kept = installer.copy_user_works(path, new_lib)
+                new_lib.db.close()
+                with self.lib.lock:
+                    self.lib.db.close()
+                    for f in (path + "-wal", path + "-shm"):
+                        if os.path.exists(f):
+                            os.remove(f)
+                    os.replace(tmp, path)
+                    for f in (tmp + "-wal", tmp + "-shm"):
+                        if os.path.exists(f):
+                            os.remove(f)
+                    self.lib = Library(path)
+                    if self.catalog:
+                        self.dl.lib = self.lib
+                installer.mark_installed(self.data, parts)
+                self.install.update(state="done", progress=100, message=f"Library installed: {n:,} seforim" + (f" (kept {kept} of your own)" if kept else ""))
+            except Exception as e:  # noqa
+                traceback.print_exc()
+                self.install.update(state="error", message=f"Could not install the library: {e}")
+        threading.Thread(target=run, daemon=True).start()
+        return self.install
+
+    def api_install_status(self, a):
+        return self.install
+
+    def api_install_check(self, a):
+        return self.check_library_install(a.get("folder"))
 
     def _last_profile(self):
         p = os.path.join(self.data, "profiles", "_last.txt")
@@ -131,7 +191,7 @@ class App:
              "catalog": self.catalog.info() if self.catalog else None, "plugins": self.plugins,
              "share": {"enabled": self.share.enabled, "code": self.share.code, "ips": local_ips(),
                        "port": self.share_server.server_address[1] if self.share_server else None, "name": self.share.name},
-             "data_dir": self.data, "pin_set": bool(self.user.get_setting("pin_hash"))}
+             "data_dir": self.data, "pin_set": bool(self.user.get_setting("pin_hash")), "install": self.install}
         s["settings"].pop("pin_hash", None)
         return s
 
@@ -789,9 +849,9 @@ class App:
         if os.name == "nt":
             os.startfile(p if os.path.isdir(p) else os.path.dirname(p))  # noqa
         elif shutil.which("open"):
-            os.system(f'open "{p}"')
+            winproc.popen(["open", p])
         elif shutil.which("xdg-open"):
-            os.system(f'xdg-open "{os.path.dirname(p) if os.path.isfile(p) else p}" &')
+            winproc.popen(["xdg-open", os.path.dirname(p) if os.path.isfile(p) else p])
         return {"ok": True}
 
     def api_quit(self, a):

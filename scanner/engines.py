@@ -23,6 +23,12 @@ import numpy as np
 
 from .cleanup import split_strips
 
+try:
+    from core import winproc
+except ImportError:  # running scanner/engines.py on its own
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from core import winproc
+
 OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 if not OLLAMA_URL.startswith("http"):
     OLLAMA_URL = "http://" + OLLAMA_URL
@@ -261,7 +267,8 @@ class TesseractEngine:
         if not exe:
             return False, "Tesseract not installed (Windows: UB-Mannheim installer, tick 'Hebrew')"
         try:
-            langs = subprocess.run([exe, "--list-langs"], capture_output=True, text=True, timeout=10).stdout
+            r = winproc.run([exe, "--list-langs"], timeout=20)
+            langs = (r.stdout or "") + (r.stderr or "")
         except Exception as e:  # noqa
             return False, str(e)
         if "heb" not in langs.split():
@@ -281,8 +288,9 @@ class TesseractEngine:
             cv2.imwrite(p, gray)
             if progress:
                 progress(0, 1, "Tesseract reading")
-            r = subprocess.run([exe, p, "stdout", "-l", "heb", "--psm", "6"],
-                               capture_output=True, text=True, encoding="utf-8", timeout=300)
+            r = winproc.run([exe, p, "stdout", "-l", "heb", "--psm", "6"], timeout=300)
+            if r.returncode != 0 and not (r.stdout or "").strip():
+                raise RuntimeError("Tesseract failed: " + (r.stderr or "").strip()[-300:])
         return clean_transcription(r.stdout)
 
 

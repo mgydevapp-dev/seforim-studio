@@ -8,6 +8,8 @@ import platform
 import random
 import socket
 import subprocess
+
+from . import winproc
 import threading
 import time
 import urllib.error
@@ -165,13 +167,13 @@ def bluetooth_send(path):
     sysname = platform.system()
     try:
         if sysname == "Windows":
-            subprocess.Popen(["fsquirt.exe"])  # Windows Bluetooth File Transfer wizard (choose the file shown in the folder)
-            subprocess.Popen(["explorer", "/select,", os.path.abspath(path)])
+            winproc.popen(["fsquirt.exe"])  # Windows Bluetooth File Transfer wizard (choose the file shown in the folder)
+            winproc.popen(["explorer", "/select,", os.path.abspath(path)])
             return "Bluetooth wizard opened. Choose 'Send files', pick the device, then select the highlighted file."
         if sysname == "Darwin":
-            subprocess.Popen(["open", "-a", "Bluetooth File Exchange", path])
+            winproc.popen(["open", "-a", "Bluetooth File Exchange", path])
             return "Bluetooth File Exchange opened."
-        subprocess.Popen(["bluetooth-sendto", path])
+        winproc.popen(["bluetooth-sendto", path])
         return "Bluetooth send dialog opened."
     except Exception as e:  # noqa
         return f"Could not open Bluetooth dialog ({e}). The file is saved at: {path}"
@@ -181,7 +183,7 @@ def bluetooth_receive():
     sysname = platform.system()
     try:
         if sysname == "Windows":
-            subprocess.Popen(["fsquirt.exe", "-receive"])
+            winproc.popen(["fsquirt.exe", "-receive"])
             return "Waiting for a Bluetooth file. When it arrives, use Import to open the .seforim file."
         if sysname == "Darwin":
             return "On Mac, turn on Bluetooth Sharing in System Settings → General → Sharing, then Import the received file."

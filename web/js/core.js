@@ -246,6 +246,21 @@ const App = {
   },
 
   status(msg) { $("#status-left").textContent = msg; },
+  async waitInstall() {
+    this.modal(`<h3>📚 Installing the seforim library</h3><p>This happens only once and takes a few minutes. Please keep the app open.</p>
+      <div class="progress" style="height:14px"><div id="instBar"></div></div><p class="small muted" id="instMsg"></p>`);
+    while (true) {
+      const st = await this.api("install_status").catch(() => ({ state: "running", progress: 0 }));
+      const bar = $("#instBar"); if (bar) bar.style.width = (st.progress || 0) + "%";
+      const m = $("#instMsg"); if (m) m.textContent = `${st.message || ""} ${st.progress ? "(" + Math.round(st.progress) + "%)" : ""}`;
+      if (st.state !== "running") {
+        this.closeModal();
+        if (st.state === "error") this.toast(st.message, true); else { this.toast(st.message); location.reload(); }
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  },
   saveSession() {
     clearTimeout(this._ss); this._ss = setTimeout(() => {
       const sess = { page: this.current, tabs: (window.Library && Library.tabs || []).map(t => ({ work_id: t.work_id, node: t.node, chapter: t.chapter, title: t.title })), active: window.Library ? Library.activeIdx : 0 };
@@ -263,6 +278,7 @@ const App = {
   async start() {
     this.initKeyboard(); this.initOSK(); this.initClipCatcher();
     this.state.status = await this.api("status");
+    if (this.state.status.install && this.state.status.install.state === "running") await this.waitInstall();
     this.state.settings = this.state.status.settings || {};
     $("#profileName").textContent = this.state.status.profile;
     await this.loadFonts().catch(() => {});
