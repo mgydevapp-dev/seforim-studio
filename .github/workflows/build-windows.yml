@@ -33,11 +33,20 @@ jobs:
           $py = "_build\python\python.exe"
           if (-not (Test-Path $py)) { $py = "python" }
           & $py -m pip install playwright --quiet
+          # install exactly the way a user does: run the Setup program (silent mode)
+          $inst = Join-Path $env:RUNNER_TEMP "SeforimStudio"
+          Start-Process "SeforimStudio-Setup.exe" -ArgumentList "--silent","--dir","$inst","--no-launch" -Wait
+          if (-not (Test-Path "$inst\SeforimStudio.exe")) { throw "Setup did not install the app" }
+          if (-not (Test-Path "$inst\_internal\python312.dll")) { throw "Setup did not install python312.dll" }
+          Write-Host "Setup installed: $((Get-ChildItem $inst -Recurse -File | Measure-Object).Count) files"
+          Write-Host "Fonts in app: $((Get-ChildItem "$inst\data\fonts" -Recurse -Filter *.ttf | Measure-Object).Count) ttf files"
+          Write-Host "Fonts in Windows (per-user): $((Get-ChildItem "$env:LOCALAPPDATA\Microsoft\Windows\Fonts" -Filter *.ttf -ErrorAction SilentlyContinue | Measure-Object).Count)"
+          Write-Host "Desktop shortcut: $(Test-Path "$env:USERPROFILE\Desktop\Seforim Studio.lnk")"
           $data = Join-Path $env:RUNNER_TEMP "testdata"
-          Copy-Item "SeforimStudio-Portable\data" $data -Recurse
+          Copy-Item "$inst\data" $data -Recurse
           $env:TEST_DATA = $data
           $env:PYTHONIOENCODING = "utf-8"
-          & $py tests\windows_ui_test.py "SeforimStudio-Portable\SeforimStudio.exe" "ci-results"
+          & $py tests\windows_ui_test.py "$inst\SeforimStudio.exe" "ci-results"
           if ($LASTEXITCODE -ne 0) { throw "some checks failed - see ci-results/report.md" }
 
       - name: Publish test results (branch ci-results)
@@ -67,10 +76,12 @@ jobs:
           $notes = @"
           **Seforim Studio - portable Windows app (no install, works offline)**
 
-          1. Download **SeforimStudio-Portable.zip** and unzip it.
-          2. Download ALL the **SeforimLibrary.sqlite.xz.part...** files (the complete library: every sefer in Hebrew + English with cross-references) and put them in the unzipped **SeforimStudio-Portable** folder, next to SeforimStudio.exe.
-          3. Double-click **SeforimStudio.exe** - it installs the library once (a few minutes). Then you may delete the part files.
-          4. Copy the whole SeforimStudio-Portable folder to any offline computer.
+          1. Download **SeforimStudio-Setup.exe** and BOTH **SeforimLibrary.sqlite.xz.part1of2 / part2of2** (the complete library) into your Downloads folder.
+          2. Double-click **SeforimStudio-Setup.exe** -> Install. It makes a Desktop shortcut, installs the Hebrew fonts into Windows (for Word too) and starts the app.
+          3. On first start the app finds the library parts in Downloads and installs them once (a few minutes). Then you may delete the part files.
+          4. The installed folder (default: your user folder\SeforimStudio) is portable - copy it to any offline computer.
+
+          (Alternative: SeforimStudio-Portable.zip - right-click it -> **Extract All** first; do not run the exe from inside the zip.)
 
           Already inside the app: Hebrew titles of all seforim, 50+ Hebrew fonts, Tesseract Hebrew reader for the scanner.
           Built from commit ${{ github.sha }} - tested automatically on Windows.
@@ -78,7 +89,7 @@ jobs:
           gh release view latest *> $null
           if ($LASTEXITCODE -ne 0) { gh release create latest --title "Seforim Studio - portable Windows app" --notes "$notes" }
           else { gh release edit latest --notes "$notes" }
-          gh release upload latest SeforimStudio-Portable.zip --clobber
+          gh release upload latest SeforimStudio-Setup.exe SeforimStudio-Portable.zip --clobber
 
   library:
     if: (github.event_name == 'workflow_dispatch' && inputs.build_library) || contains(github.event.head_commit.message, '[library]')

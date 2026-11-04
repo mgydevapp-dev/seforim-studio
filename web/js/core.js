@@ -225,7 +225,7 @@ const App = {
   async setSetting(key, value) { this.state.settings[key] = value; await this.api("setting", { key, value }); },
   async loadFonts() {
     const fonts = await this.api("fonts");
-    const css = fonts.map(f => `@font-face{font-family:"${f.family}";src:url("${f.url}") format("${f.file.endsWith(".ttf") ? "truetype" : "woff2"}");font-weight:${/700/.test(f.file) ? 700 : 400};${/latin/.test(f.file) ? "unicode-range:U+0000-024F;" : /hebrew/.test(f.file) ? "unicode-range:U+0590-05FF,U+FB1D-FB4F,U+200C-2010,U+20AA,U+25CC;" : ""}}`).join("\n");
+    const css = fonts.map(f => `@font-face{font-family:"${f.family}";src:url("${f.url}") format("${/\.(ttf|otf)$/.test(f.file) ? "truetype" : "woff2"}");font-weight:${/700/.test(f.file) ? 700 : 400};font-display:swap;${/latin/.test(f.file) ? "unicode-range:U+0000-024F;" : /hebrew/.test(f.file) ? "unicode-range:U+0590-05FF,U+FB1D-FB4F,U+200C-2010,U+20AA,U+25CC;" : ""}}`).join("\n");
     let st = $("#appFonts"); if (!st) { st = document.createElement("style"); st.id = "appFonts"; document.head.appendChild(st); }
     st.textContent = css;
     this.state.fonts = [...new Set(fonts.map(f => f.family))];

@@ -90,6 +90,10 @@ try:
     check("Gematria value of שלום = 376", r["value"] == 376, r["value"])
     r = api("roshei", letters="בבא")
     check("Roshei teivos search runs", "total" in r, r.get("total"))
+    fonts = api("fonts")
+    fams = sorted({f["family"] for f in fonts})
+    check("Hebrew fonts are included (40+ families, TrueType)", len(fams) >= 40 and all(f["file"].endswith(".ttf") for f in fonts),
+          f"{len(fams)} families: {', '.join(fams[:12])}…")
     eng = {e["key"]: e for e in api("scan_engines")}
     check("Tesseract Hebrew engine available in the exe", eng["tesseract"]["ok"], eng["tesseract"]["info"])
 except Exception as e:  # noqa
@@ -132,6 +136,15 @@ with sync_playwright() as p:
                 pass
 
     step("Home screen", lambda: shot("home"))
+
+    def fonts_render():
+        pg.evaluate("document.fonts.ready")
+        bad = pg.evaluate("""async () => { const fams = ["Frank Ruhl Libre", "David Libre", "Heebo", "Noto Rashi Hebrew", "Rubik", "Suez One"];
+            const out = []; for (const f of fams) { await document.fonts.load(`24px "${f}"`, "שלום"); if (!document.fonts.check(`24px "${f}"`, "שלום")) out.push(f); } return out; }""")
+        assert not bad, f"fonts not loading: {bad}"
+        go("settings"); pg.click("#stTabs [data-t=fonts]"); pg.wait_for_timeout(2500); shot("fonts")
+        assert pg.locator("#fList .list-item").count() >= 40, "font list too short"
+    step("Hebrew fonts load and display", fonts_render)
 
     def library():
         go("library")

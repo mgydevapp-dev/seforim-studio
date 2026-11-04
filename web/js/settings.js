@@ -60,7 +60,7 @@ const Settings = {
   async t_fonts(el) {
     await App.loadFonts();
     const fonts = App.fontList();
-    el.innerHTML = `<div class="card"><div class="row"><b>${fonts.length} Hebrew-capable fonts available</b><span class="spacer"></span><button class="btn primary" id="fDl">⬇ Download the free Hebrew font pack (50+ fonts, once)</button><button class="btn" id="fImp">Add a font file (.ttf/.otf/.woff2)…</button></div>
+    el.innerHTML = `<div class="card"><div class="row"><b>${fonts.length} Hebrew-capable fonts available</b><span class="spacer"></span><button class="btn primary" id="fDl">⬇ Download the free Hebrew font pack (50+ fonts, once)</button><button class="btn" id="fImp">Add a font file (.ttf/.otf/.woff2)…</button><button class="btn" id="fWin" title="So Microsoft Word and other programs can use them too">Install fonts into Windows (for Word)</button></div>
       <div class="progress hidden" id="fProg" style="margin-top:8px"><div></div></div>
       <input id="fSample" class="he-input" value="בְּרֵאשִׁית בָּרָא אֱלֹהִים — שערי תורה 5787" style="width:100%;margin-top:10px">
       <div id="fList" style="margin-top:10px"></div></div>`;
@@ -68,6 +68,7 @@ const Settings = {
     draw(); $("#fSample").oninput = draw;
     $("#fList").onclick = async e => { const f = e.target.dataset.he; if (f) { await App.setSetting("he_font", f); App.applySettings(); App.toast("Hebrew reading font: " + f); } };
     $("#fDl").onclick = async () => { const { job } = await App.api("fonts_download", {}); $("#fProg").classList.remove("hidden"); const r = await App.job(job, s => $("#fProg div").style.width = (s.total ? 100 * s.progress / s.total : 2) + "%"); App.toast(`Downloaded ${r.downloaded.length} font families`); this.t_fonts(el); };
+    $("#fWin").onclick = async () => { const r = await App.api("fonts_install_windows"); App.toast(r.message); };
     $("#fImp").onclick = async () => { const u = await App.uploadPicked(".ttf,.otf,.woff,.woff2"); for (const x of u) await App.api("fonts_import", { upload: x.upload }); this.t_fonts(el); };
   },
   t_appearance(el) {

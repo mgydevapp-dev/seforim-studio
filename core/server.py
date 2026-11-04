@@ -658,6 +658,10 @@ class App:
         from .fonts import download_font_pack
         return {"job": self.jobs.start(download_font_pack, os.path.join(self.data, "fonts"), a.get("families"))}
 
+    def api_fonts_install_windows(self, a):
+        from .fonts import install_windows
+        return install_windows(os.path.join(self.data, "fonts"))
+
     def api_fonts_import(self, a):
         p = self._upload_path(a["upload"])
         fam = re.sub(r"[^\w \-]", "", a.get("family") or os.path.splitext(os.path.basename(p))[0]).strip() or "Custom"

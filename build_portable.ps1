@@ -24,7 +24,7 @@ if (-not (Test-Path "$PyDir\python.exe")) {
     Invoke-WebRequest $PyUrl -OutFile $pyExe
     Step "     Installing it privately into _build\python"
     $p = Start-Process $pyExe -Wait -PassThru -ArgumentList @("/quiet", "InstallAllUsers=0", "TargetDir=$PyDir", "Include_launcher=0",
-        "Include_test=0", "Include_doc=0", "Include_tcltk=0", "PrependPath=0", "Shortcuts=0", "AssociateFiles=0", "Include_pip=1")
+        "Include_test=0", "Include_doc=0", "Include_tcltk=1", "PrependPath=0", "Shortcuts=0", "AssociateFiles=0", "Include_pip=1")
 }
 $Py = "$PyDir\python.exe"
 if (-not (Test-Path $Py)) {
@@ -128,6 +128,18 @@ $zip = Join-Path $Root "SeforimStudio-Portable.zip"
 if (Test-Path $zip) { Remove-Item $zip -Force }
 try { Compress-Archive -Path $Out -DestinationPath $zip -CompressionLevel Optimal }
 catch { Write-Host "     (Skipped the .zip - the folder is too big to zip. Just copy the folder itself.)" -ForegroundColor Yellow; $zip = "(not made)" }
+
+# 6. One-click installer (SeforimStudio-Setup.exe) - avoids running the exe from inside the zip
+Step "Making SeforimStudio-Setup.exe"
+try {
+    if (-not (Test-Path $zip)) { throw "zip missing" }
+    & $Py -m PyInstaller --noconfirm --onefile --windowed --name "SeforimStudio-Setup" --icon (Join-Path $Root "web\icon.ico") `
+        --add-data "$zip;." --add-data "$(Join-Path $Root 'web\icon.ico');." `
+        --distpath "$Work\setupdist" --workpath "$Work\setupbuild" --specpath "$Work" (Join-Path $Root "tools\setup_app.py")
+    if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+    Copy-Item "$Work\setupdist\SeforimStudio-Setup.exe" (Join-Path $Root "SeforimStudio-Setup.exe") -Force
+    Write-Host "     Setup: $(Join-Path $Root 'SeforimStudio-Setup.exe')" -ForegroundColor Green
+} catch { Write-Host "     Could not make the Setup program ($_). The zip still works (unzip it first)." -ForegroundColor Yellow }
 
 Write-Host ""
 Write-Host "DONE!" -ForegroundColor Green
