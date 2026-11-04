@@ -445,20 +445,145 @@ def looks_visual(lines):
     return starts > ends
 
 
+_MIRROR = str.maketrans("()[]{}<>", ")(][}{><")
+_RTL = re.compile(r"[֐-׿יִ-ﭏ]")
+_LTR = re.compile(r"[A-Za-z0-9À-ɏ]")
+
+
+_TOK = re.compile(r"[A-Za-z0-9À-ɏ]*[A-Za-zÀ-ɏ][A-Za-z0-9À-ɏ]*"   # L: word (may contain digits)
+                  r"|[0-9]+(?:[.,:/\-][0-9]+)*"                                                  # EN: number
+                  r"|[֐-׿יִ-ﭏ]+"                                              # R: Hebrew
+                  r"|.", re.S)
+
+
+def _kind(t):
+    if _RTL.match(t):
+        return "R"
+    if re.match(r"[A-Za-zÀ-ɏ]", t) or (re.match(r"[0-9]", t) and re.search(r"[A-Za-z]", t)):
+        return "L"
+    if t[0].isdigit():
+        return "EN"
+    return "N"
+
+
+def _fix_brackets(s):
+    s = re.sub(r"\(([^()]*)\(", r"(\1)", s)
+    s = re.sub(r"\)([^()]*)\)", r"(\1)", s)
+    s = re.sub(r"\[([^\[\]]*)\[", r"[\1]", s)
+    return re.sub(r"\]([^\[\]]*)\]", r"[\1]", s)
+
+
+def _visual_line_to_logical(chars):
+    """chars: characters in VISUAL order (left→right on the page). Returns logical (reading) order."""
+    vis = "".join(chars)
+    n_r, n_l = len(_RTL.findall(vis)), len(_LTR.findall(vis))
+    if n_r == 0:
+        return vis
+    strong = [c for c in vis if _RTL.match(c) or re.match(r"[A-Za-z\u00C0-\u024F]", c)]
+    rtl_line = bool(strong) and (_RTL.match(strong[-1]) is not None or (not re.match(r"[A-Za-z]", strong[0]) and n_r >= n_l))
+    if rtl_line:  # right-to-left line (its first letter, at the right edge, is Hebrew)
+        toks = _TOK.findall(vis[::-1])
+        kinds = [_kind(t) for t in toks]
+        out, i = [], 0
+        while i < len(toks):
+            k = kinds[i]
+            if k == "EN":  # a number that follows an English word ("Genesis 1:1") belongs to that English run
+                j = i + 1
+                while j < len(toks) and kinds[j] == "N":
+                    j += 1
+                if j < len(toks) and kinds[j] == "L":
+                    k = "L"
+            if k == "L":  # English run: words + the spaces/numbers between them, back in left-to-right order
+                last, j = i, i
+                while j < len(toks) and kinds[j] != "R":
+                    if kinds[j] == "L":
+                        last = j
+                    j += 1
+                out.append("".join(toks[i:last + 1])[::-1])
+                i = last + 1
+            elif k == "EN":
+                out.append(toks[i][::-1])
+                i += 1
+            elif k == "N":
+                out.append(toks[i].translate(_MIRROR))
+                i += 1
+            else:
+                out.append(toks[i])
+                i += 1
+        return _fix_brackets("".join(out))
+    # left-to-right line with some Hebrew: re-reverse the Hebrew phrases
+    return re.sub(r"[֐-׿יִ-ﭏ][֐-׿יִ-ﭏ\s\"'״׳]*[֐-׿יִ-ﭏ]|[֐-׿]",
+                  lambda m: m.group(0)[::-1], vis)
+
+
+def _page_text_by_position(tp):
+    """Rebuild reading order from each character's position on the page (same result on every computer)."""
+    n = tp.count_chars()
+    items = []
+    for i in range(n):
+        ch = tp.get_text_range(i, 1)
+        if not ch or ch in "\r\n\x02￾":
+            continue
+        l, b, r, t = tp.get_charbox(i)
+        if r - l <= 0 and t - b <= 0:
+            continue
+        items.append((ch, l, r, (b + t) / 2, t - b))
+    if not items:
+        return ""
+    hs = sorted(x[4] for x in items if x[4] > 0)
+    med_h = hs[len(hs) // 2] if hs else 10
+    items.sort(key=lambda x: -x[3])
+    lines, cur, cy = [], [], None
+    for it in items:
+        if cy is None or abs(it[3] - cy) <= med_h * 0.55:
+            cur.append(it)
+            cy = it[3] if cy is None else (cy * (len(cur) - 1) + it[3]) / len(cur)
+        else:
+            lines.append(cur)
+            cur, cy = [it], it[3]
+    if cur:
+        lines.append(cur)
+    out = []
+    for ln in lines:
+        ln.sort(key=lambda x: x[1])
+        ws = sorted(x[2] - x[1] for x in ln if x[0] != " ")
+        avg_w = ws[len(ws) // 2] if ws else med_h * 0.5
+        chars, last_r = [], None
+        for ch, l, r, _, _ in ln:
+            if ch == " ":
+                if chars and chars[-1] != " ":
+                    chars.append(" ")
+                last_r = r
+                continue
+            gap = (l - last_r) if last_r is not None else 0
+            punct = ch in ".,:;!?)(][״׳'\"" or (chars and chars[-1] in ".,:;!?)(][")
+            if last_r is not None and gap > avg_w * (0.75 if punct else 0.33) and chars and chars[-1] != " ":
+                chars.append(" ")
+            chars.append(ch)
+            last_r = r
+        out.append(_visual_line_to_logical(chars).strip())
+    return "\n".join(out)
+
+
 def pdf_text_pages(path, order="auto"):
-    """Text layer of a PDF (no OCR). Returns list of page strings ('' for scanned pages).
-    order: 'auto' | 'visual' (fix reversed Hebrew) | 'logical' (leave as is)."""
+    """Typed text of a PDF (no OCR). Returns list of page strings ('' for scanned/picture pages).
+    order: 'auto' (by letter positions — correct on every computer) | 'visual' | 'logical' (raw order from the PDF)."""
     import pypdfium2 as pdfium
     out = []
     pdf = pdfium.PdfDocument(path)
     try:
         for i in range(len(pdf)):
             tp = pdf[i].get_textpage()
+            if order == "auto":
+                try:
+                    out.append(_page_text_by_position(tp).strip())
+                    continue
+                except Exception:
+                    pass
             t = (tp.get_text_range() or "").replace("\r\n", "\n")
             lines = [l.rstrip() for l in t.splitlines()]
-            fix = order == "visual" or (order == "auto" and looks_visual(lines))
-            if fix:
-                lines = [visual_to_logical(l) if H.has_hebrew(l) and len(H.RE_HEB.findall(l)) >= len(H.RE_LAT.findall(l)) else l for l in lines]
+            if order == "visual":
+                lines = [visual_to_logical(l) if H.has_hebrew(l) else l for l in lines]
             out.append("\n".join(lines).strip())
     finally:
         pdf.close()
