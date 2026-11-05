@@ -101,8 +101,25 @@ def library_parts_hint():
     return None
 
 
+def copy_packs(dest, log=print):
+    """Library / AI part files sitting next to Setup (e.g. all on one USB stick) are copied into the app folder,
+    where the app installs them on first start - so the whole thing works on an offline computer."""
+    here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+    n = 0
+    for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimAI.tar*")):
+        target = os.path.join(dest, os.path.basename(p))
+        if os.path.abspath(p) == os.path.abspath(target) or (os.path.exists(target) and os.path.getsize(target) == os.path.getsize(p)):
+            continue
+        log(f"Copying {os.path.basename(p)}…")
+        shutil.copyfile(p, target)
+        n += 1
+    return n
+
+
 def run_all(dest, shortcuts=True, fonts=True, log=print, progress=lambda f: None):
     exe = install(dest, log, progress)
+    if copy_packs(dest, log):
+        log("Library / AI files copied - they install automatically when the app starts")
     if shortcuts:
         try:
             make_shortcuts(exe)

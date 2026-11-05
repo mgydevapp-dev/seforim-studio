@@ -151,6 +151,7 @@ class App:
                 shutil.move(src, self.ai_dir())
                 shutil.rmtree(tmp, ignore_errors=True)
                 installer.mark_installed(self.data, parts, "ai")
+                self._cleanup_parts(parts)
                 started = self.start_bundled_ollama()
                 self.ai.update(state="done", progress=100,
                                message="AI handwriting reader installed" + (" and running" if started else " (it starts with the app)"))
@@ -208,12 +209,23 @@ class App:
                     if self.catalog:
                         self.dl.lib = self.lib
                 installer.mark_installed(self.data, parts)
+                self._cleanup_parts(parts)
                 self.install.update(state="done", progress=100, message=f"Library installed: {n:,} seforim" + (f" (kept {kept} of your own)" if kept else ""))
             except Exception as e:  # noqa
                 traceback.print_exc()
                 self.install.update(state="error", message=f"Could not install the library: {e}")
         threading.Thread(target=run, daemon=True).start()
         return self.install
+
+    def _cleanup_parts(self, parts):
+        """Remove part files that Setup copied INTO the app folder (never touches the user's Downloads)."""
+        app_dir = os.path.abspath(os.path.dirname(self.data))
+        for p in parts:
+            if os.path.dirname(os.path.abspath(p)) in (app_dir, os.path.abspath(self.data)):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     def api_install_status(self, a):
         return self.install

@@ -87,10 +87,10 @@ jobs:
           $notes = @"
           **Seforim Studio - portable Windows app (no install, works offline)**
 
-          1. Download into your Downloads folder: **SeforimStudio-Setup.exe**, ALL **SeforimLibrary.sqlite.xz.part...** files (the complete library) and ALL **SeforimAI.tar.part...** files (the AI handwriting reader).
+          1. Download ALL the files below into ONE folder (e.g. Downloads, or a USB stick): **SeforimStudio-Setup.exe**, every **SeforimLibrary.sqlite.xz.part...** (the complete library) and every **SeforimAI.tar.part...** (the AI handwriting reader).
           2. Double-click **SeforimStudio-Setup.exe** -> Install. It makes a Desktop shortcut, installs the Hebrew fonts into Windows (for Word too) and starts the app.
           3. On first start the app finds the library and AI parts in Downloads and installs them once (a few minutes). Then you may delete the part files.
-          4. The installed folder (default: your user folder\SeforimStudio) is portable - copy it to any offline computer.
+          4. For an OFFLINE computer: copy that same folder of files (USB stick) to it and double-click SeforimStudio-Setup.exe there - no internet needed. Or in the app: Settings > Backup > "Make the complete zip".
 
           (Alternative: SeforimStudio-Portable.zip - right-click it -> **Extract All** first; do not run the exe from inside the zip.)
 
@@ -173,9 +173,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view latest > /dev/null 2>&1 || gh release create latest --title "Seforim Studio - portable Windows app" --notes "Building…"
-          for a in $(gh release view latest --json assets -q '.assets[].name' | grep '^SeforimAI' || true); do gh release delete-asset latest "$a" -y; done
-          gh release upload latest out/SeforimAI.tar.part* --clobber
+          R="--repo ${{ github.repository }}"
+          gh release view latest $R > /dev/null 2>&1 || gh release create latest $R --title "Seforim Studio - portable Windows app" --notes "Building…"
+          for a in $(gh release view latest $R --json assets -q '.assets[].name' | grep '^SeforimAI' || true); do gh release delete-asset latest "$a" -y $R; done
+          gh release upload latest out/SeforimAI.tar.part* --clobber $R
 
   ai-test:
     needs: [windows, ai]
@@ -192,7 +193,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release download latest --pattern 'SeforimAI.tar.part*' -D aiparts
+        run: gh release download latest --pattern 'SeforimAI.tar.part*' -D aiparts --repo ${{ github.repository }}
       - name: Install like a user and read handwriting with the AI
         shell: pwsh
         run: |
