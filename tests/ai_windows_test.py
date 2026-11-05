@@ -32,7 +32,8 @@ dl = os.path.join(os.path.expanduser("~"), "Downloads")
 os.makedirs(dl, exist_ok=True)
 for f in os.listdir(PARTS):
     if f.startswith("SeforimAI.tar"):
-        os.replace(os.path.join(PARTS, f), os.path.join(dl, f))
+        import shutil
+        shutil.move(os.path.join(PARTS, f), os.path.join(dl, f))  # works across drives (C: / D:)
 say("AI pack parts in Downloads: " + ", ".join(sorted(f for f in os.listdir(dl) if f.startswith("SeforimAI"))))
 
 proc = subprocess.Popen([exe, "--no-window", "--port", str(PORT)], cwd=inst)

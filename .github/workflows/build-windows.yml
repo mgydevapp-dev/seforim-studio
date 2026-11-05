@@ -180,7 +180,7 @@ jobs:
 
   ai-test:
     needs: [windows, ai]
-    if: always() && needs.ai.result == 'success'
+    if: always() && needs.windows.result == 'success' && (needs.ai.result == 'success' || contains(github.event.head_commit.message, '[ai-test]'))
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
