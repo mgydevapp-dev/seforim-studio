@@ -88,6 +88,8 @@ def main():
         # some browsers hand off to an existing process; keep running while the page still pings us
         while time.time() - app.last_ping < 20:
             time.sleep(5)
+        if app.ollama_proc:
+            app.ollama_proc.terminate()  # stop the bundled AI reader together with the app
     else:
         webbrowser.open(url)
         print("Opened in your default browser. Close this window to quit.")

@@ -224,11 +224,18 @@ with sync_playwright() as p:
         go("cover"); pg.wait_for_timeout(2000)
         for t in ["vilna", "night", "leather"]:
             pg.click(f"#cvTpls canvas[data-t={t}]"); pg.wait_for_timeout(500)
+        pg.click("#cvTpls canvas[data-t=blank]"); pg.check("#cv_hideText"); pg.click("#cvAddText"); pg.wait_for_timeout(300)
+        pg.fill('#cvProps textarea[data-k=text]', "העיצוב שלי"); pg.dispatch_event('#cvProps textarea[data-k=text]', "input")
+        pg.select_option("#cvAddOrn", "menorah"); pg.wait_for_timeout(300)
+        c = pg.locator("#cvCan").bounding_box()
+        pg.mouse.move(c["x"] + c["width"] * .5, c["y"] + c["height"] * .5); pg.mouse.down()
+        pg.mouse.move(c["x"] + c["width"] * .5, c["y"] + c["height"] * .2, steps=6); pg.mouse.up()
+        assert pg.locator("#cvLayers .list-item").count() == 2, "own-design layers missing"
         shot("cover")
         with pg.expect_download() as dl:
             pg.click("#cvPng")
         dl.value.save_as(os.path.join(OUT, "cover.png"))
-    step("Covers: change design, export PNG", covers)
+    step("Covers: templates + my own design (text, ornament, drag), export PNG", covers)
 
     def scanner():
         go("scanner"); pg.wait_for_timeout(1500)

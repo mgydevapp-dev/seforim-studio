@@ -1,6 +1,7 @@
 /* Sefer cover designer: fill in the details, pick a template, get a beautiful print-ready cover (front or full wrap) */
 const GOLD = ["#7a5a14", "#f6dc8b", "#b8892b", "#fff1b8", "#8f6a1c"], SILVER = ["#6b6f78", "#f4f6fa", "#a9afba", "#ffffff", "#7c818c"];
 const COVER_TEMPLATES = {
+  blank: { name: "Blank (design your own)", bg: "#f6f1e6", metal: ["#1e3a5f", "#1e3a5f", "#1e3a5f", "#1e3a5f", "#1e3a5f"], frame: "none", corner: "none", texture: "none", ornament: "none", ink: true },
   leather: { name: "Leather & Gold", bg: "#4a2a17", metal: GOLD, frame: "double", corner: "flourish", texture: "leather", ornament: "star" },
   navy: { name: "Navy Gilt", bg: "#14284a", metal: GOLD, frame: "diamonds", corner: "flourish", texture: "cloth", ornament: "crown" },
   burgundy: { name: "Burgundy Ornate", bg: "#5e1222", metal: GOLD, frame: "panel", corner: "flourish", texture: "leather", ornament: "crown" },
@@ -33,7 +34,8 @@ const Cover = {
   d: null,
   defaults() {
     return { id: null, tpl: "leather", top: "בס״ד", title: "שערי תורה", subtitle: "חידושים וביאורים על התורה", author: "מאת הרב פלוני אלמוני", author2: "", publisher: "ירושלים", year: "", dedication: "",
-      back: "ספר זה נכתב לזכות…", spine: "", size: "6 × 9 in", wrap: false, titleFont: "Frank Ruhl Libre", bodyFont: "David Libre", bg: "", metal: "", emboss: true, texture: 70, titleSize: 100 };
+      back: "ספר זה נכתב לזכות…", spine: "", size: "6 × 9 in", wrap: false, titleFont: "Frank Ruhl Libre", bodyFont: "David Libre", bg: "", metal: "", emboss: true, texture: 70, titleSize: 100,
+      hideText: false, layers: [], bgImage: null, bgOpacity: 100 };
   },
   render(el) {
     const fonts = App.fontList();
@@ -54,6 +56,15 @@ const Cover = {
       <label>Title font</label>${fsel("cv_titleFont")}<label>Text font</label>${fsel("cv_bodyFont")}
       <div class="row"><label>Cover colour <input type="color" id="cv_bg"></label><label>Lettering <input type="color" id="cv_metal"></label><label><input type="checkbox" id="cv_emboss"> Emboss</label></div>
       <label>Texture <input type="range" id="cv_texture" min="0" max="100"></label><label>Title size <input type="range" id="cv_titleSize" min="50" max="160"></label>
+      <h2 style="margin-top:16px">✏️ My own design</h2>
+      <p class="small muted" style="margin:0">Add your own text, pictures, ornaments and shapes. Drag them on the cover; arrows nudge, Delete removes.</p>
+      <div class="row" style="margin-top:6px"><button class="btn small" id="cvAddText">+ Text</button><button class="btn small" id="cvAddImg">+ Picture</button>
+        <select id="cvAddOrn" class="small"><option value="">+ Ornament…</option>${["star", "crown", "menorah", "luchos", "pomegranate", "rosette", "fan", "flourish", "diamond"].map(o => `<option>${o}</option>`).join("")}</select>
+        <select id="cvAddShape" class="small"><option value="">+ Shape…</option><option>rect</option><option>ellipse</option><option>line</option></select></div>
+      <div class="row" style="margin-top:6px"><button class="btn small" id="cvBgImg">🖼 Background picture</button><button class="btn small" id="cvBgNo">✕ remove</button>
+        <label class="small">opacity <input type="range" id="cv_bgOpacity" min="10" max="100" style="width:80px"></label></div>
+      <label style="margin-top:6px"><input type="checkbox" id="cv_hideText" style="width:auto"> Hide the built-in texts (use only my own)</label>
+      <div id="cvLayers" style="margin-top:6px"></div><div id="cvProps"></div>
       <div class="row" style="margin-top:12px"><button class="btn primary" id="cvSave">💾 Save</button><button class="btn" id="cvNew">New</button><button class="btn" id="cvOpen">Open…</button></div>
       <div class="row" style="margin-top:6px"><button class="btn gold" id="cvPng">⤓ PNG (300 dpi)</button><button class="btn" id="cvPdf">🖨 Print / PDF</button></div>
       </div><div class="cover-stage"><canvas id="cvCan"></canvas></div></div>`;
@@ -66,6 +77,7 @@ const Cover = {
     $("#cvPng", el).onclick = () => this.exportPng();
     $("#cvPdf", el).onclick = () => this.print();
     this.drawThumbs();
+    this.initDesign(el);
     document.fonts.ready.then(() => this.draw());
     this.draw();
   },
@@ -83,14 +95,15 @@ const Cover = {
     const g = $("#cvTpls"); g.innerHTML = "";
     for (const [k, T] of Object.entries(COVER_TEMPLATES)) {
       const c = document.createElement("canvas"); c.width = 120; c.height = 170; c.dataset.t = k; c.title = T.name;
-      g.appendChild(c); this.paint(c.getContext("2d"), 120, 170, { ...this.d, tpl: k, bg: "", metal: "", title: "ספר", subtitle: "", author: "", author2: "", top: "", publisher: "", dedication: "", year: " " }, 0.14);
+      g.appendChild(c); this.paint(c.getContext("2d"), 120, 170, { ...this.d, layers: [], bgImage: null, hideText: false, tpl: k, bg: "", metal: "", title: "ספר", subtitle: "", author: "", author2: "", top: "", publisher: "", dedication: "", year: " " }, 0.14);
       c.onclick = () => { this.d.tpl = k; this.d.bg = ""; this.d.metal = ""; this.fill(); this.read(); this.d.bg = ""; this.d.metal = ""; this.draw(); };
     }
   },
   dims(scale) { const [w, h] = SIZES[this.d.size] || [6, 9]; const dpi = 100 * scale; const spine = this.d.wrap ? 0.9 : 0; return { W: Math.round((this.d.wrap ? 2 * w + spine : w) * dpi), H: Math.round(h * dpi), front: Math.round(w * dpi), spine: Math.round(spine * dpi) }; },
   async draw() {
+    this._screen = true;
     const c = $("#cvCan"); if (!c) return;
-    if (!this.d.year) { try { const r = await App.api("tool_run", { id: "year_convert", args: { n: new Date().getFullYear() } }); this._year = (r.result.match(/\(([^/]+)\//) || [])[1] || ""; } catch (e) { } }
+    if (!this.d.year && this._year === undefined) { this._year = ""; try { const r = await App.api("tool_run", { id: "year_convert", args: { n: new Date().getFullYear() } }); this._year = (r.result.match(/\(([^/]+)\//) || [])[1] || ""; } catch (e) { } }
     const { W, H } = this.dims(1); c.width = W; c.height = H;
     this.paintFull(c.getContext("2d"), 1);
   },
@@ -161,6 +174,7 @@ const Cover = {
   paint(ctx, W, H, d, scale) {
     const T = COVER_TEMPLATES[d.tpl]; const s = W / 600;
     this.background(ctx, W, H, T, d, scale);
+    if (!d.isBack) this.paintBgImage(ctx, W, H, d);
     const m = this.metal(ctx, 0, 0, W, H);
     ctx.strokeStyle = m; ctx.fillStyle = m;
     const M = 34 * s;
@@ -197,7 +211,7 @@ const Cover = {
     // text
     const align = T.ornament === "bar" ? "right" : "center", ax = align === "right" ? W * .88 : W / 2;
     const txt = (t, y, font, size, opts = {}) => {
-      if (!t) return; ctx.save(); ctx.direction = "rtl"; ctx.textAlign = align; ctx.textBaseline = "middle";
+      if (!t || d.hideText) return; ctx.save(); ctx.direction = "rtl"; ctx.textAlign = align; ctx.textBaseline = "middle";
       let fs = size; ctx.font = `${opts.bold ? "700 " : ""}${fs}px "${font}", "Frank Ruhl Libre", "David", serif`;
       while (ctx.measureText(t).width > W * .76 && fs > 8) { fs -= 2; ctx.font = `${opts.bold ? "700 " : ""}${fs}px "${font}", "Frank Ruhl Libre", "David", serif`; }
       const g = this.metal(ctx, ax - W * .3, y - fs, W * .6, fs * 2);
@@ -210,7 +224,7 @@ const Cover = {
     const lines = (d.title || "").split(/\n|\s{2,}/);
     lines.forEach((l, i) => txt(l, titleY + (i - (lines.length - 1) / 2) * ts * 1.15, d.titleFont, ts, { bold: true }));
     txt(d.subtitle, titleY + ts * (lines.length / 2 + .55) + 16 * s, d.bodyFont, 28 * s);
-    if (T.ornament !== "bar") { ctx.save(); ctx.strokeStyle = m; ctx.lineWidth = 1.2 * s; const ly = titleY + ts * (lines.length / 2 + .55) + 52 * s; ctx.beginPath(); ctx.moveTo(W * .38, ly); ctx.lineTo(W * .62, ly); ctx.stroke(); this.diamond(ctx, W / 2, ly, 4 * s); ctx.restore(); }
+    if (T.ornament !== "bar" && !d.hideText) { ctx.save(); ctx.strokeStyle = m; ctx.lineWidth = 1.2 * s; const ly = titleY + ts * (lines.length / 2 + .55) + 52 * s; ctx.beginPath(); ctx.moveTo(W * .38, ly); ctx.lineTo(W * .62, ly); ctx.stroke(); this.diamond(ctx, W / 2, ly, 4 * s); ctx.restore(); }
     const L = { split: [.68, .86], medallion: [.74, .86], gate: [.66, .76], deco: [.6, .86], wreath: [.66, .86] }[T.frame] || [.64, null];
     if (T.ornament === "skyline") L[1] = .72;
     const onBand = y => T.frame === "split" && y > H * .58;
@@ -219,6 +233,7 @@ const Cover = {
     txt2(d.author2, H * L[0] + 40 * s, d.bodyFont, 22 * s);
     txt2([d.publisher, d.year === " " ? "" : (d.year || this._year || "")].filter(Boolean).join(" · "), L[1] ? H * L[1] : H - M - 64 * s, d.bodyFont, 22 * s);
     txt2(d.dedication, H - M - 30 * s, d.bodyFont, 14 * s);
+    this.paintLayers(ctx, W, H, d, s);
   },
   textBlock(ctx, text, x, y, w, font, lh, d) {
     ctx.save(); ctx.font = font; ctx.direction = "rtl"; ctx.textAlign = "center"; ctx.fillStyle = this.metal(ctx, 0, 0, w, 300);
@@ -286,9 +301,128 @@ const Cover = {
     for (const x of [l - 14 * s, r + 2 * s]) { ctx.fillRect(x, top, 12 * s, base - top); ctx.fillRect(x - 6 * s, base, 24 * s, 10 * s); ctx.fillRect(x - 6 * s, top - 10 * s, 24 * s, 10 * s); }
     ctx.fillRect(l - 20 * s, base + 10 * s, r - l + 40 * s, 6 * s);
   },
+  /* ===================== free design ===================== */
+  img(src) {
+    this._imgs = this._imgs || {};
+    if (!this._imgs[src]) { const im = new Image(); im.onload = () => this.draw(); im.src = src; this._imgs[src] = im; }
+    const im = this._imgs[src]; return im.complete && im.naturalWidth ? im : null;
+  },
+  paintBgImage(ctx, W, H, d) {
+    if (!d.bgImage) return; const im = this.img(d.bgImage); if (!im) return;
+    const r = Math.max(W / im.naturalWidth, H / im.naturalHeight), w = im.naturalWidth * r, h = im.naturalHeight * r;
+    ctx.save(); ctx.globalAlpha = (d.bgOpacity ?? 100) / 100; ctx.drawImage(im, (W - w) / 2, (H - h) / 2, w, h); ctx.restore();
+  },
+  paintLayers(ctx, W, H, d, s) {
+    const boxes = [];
+    for (const [i, L] of (d.layers || []).entries()) {
+      const x = L.x * W, y = L.y * H; let box = null;
+      ctx.save(); ctx.translate(x, y); if (L.rotate) ctx.rotate(L.rotate * Math.PI / 180);
+      const paintStyle = (w, h) => L.metal ? this.metal(ctx, -w / 2, -h / 2, w, h, L.color && L.color !== "#b8892b" ? [this.shade(L.color, -45), this.shade(L.color, 60), L.color, this.shade(L.color, 75), this.shade(L.color, -30)] : GOLD) : (L.color || "#1e3a5f");
+      if (L.type === "text") {
+        const fs = (L.size || 40) * s; ctx.font = `${L.bold ? "700 " : ""}${L.italic ? "italic " : ""}${fs}px "${L.font || "Frank Ruhl Libre"}", "David", serif`;
+        ctx.direction = /[\u0590-\u05FF]/.test(L.text || "") ? "rtl" : "ltr"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const lines = String(L.text || "").split("\n"); const w = Math.max(...lines.map(t => ctx.measureText(t).width), 10), h = fs * 1.2 * lines.length;
+        if (L.shadow) { ctx.shadowColor = "rgba(0,0,0,.55)"; ctx.shadowBlur = fs * .12; ctx.shadowOffsetX = fs * .04; ctx.shadowOffsetY = fs * .05; }
+        ctx.fillStyle = paintStyle(w, h);
+        lines.forEach((t, k) => ctx.fillText(t, 0, (k - (lines.length - 1) / 2) * fs * 1.2));
+        if (L.outline) { ctx.shadowColor = "transparent"; ctx.lineWidth = Math.max(1, fs * .03); ctx.strokeStyle = L.outline; lines.forEach((t, k) => ctx.strokeText(t, 0, (k - (lines.length - 1) / 2) * fs * 1.2)); }
+        box = [w, h];
+      } else if (L.type === "image") {
+        const im = this.img(L.src); const w = (L.w || .4) * W;
+        if (im) { const h = w * im.naturalHeight / im.naturalWidth; ctx.globalAlpha = (L.opacity ?? 100) / 100;
+          if (L.round) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, 7); ctx.clip(); }
+          ctx.drawImage(im, -w / 2, -h / 2, w, h);
+          if (L.border) { ctx.globalAlpha = 1; ctx.lineWidth = 4 * s; ctx.strokeStyle = paintStyle(w, h); if (L.round) { ctx.beginPath(); ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, 7); ctx.stroke(); } else ctx.strokeRect(-w / 2, -h / 2, w, h); }
+          box = [w, h]; } else box = [w, w];
+      } else if (L.type === "orn") {
+        const r = (L.size || 30) * s; ctx.fillStyle = ctx.strokeStyle = paintStyle(r * 2, r * 2);
+        if (L.kind === "flourish") this.flourish(ctx, -r, -r, 1, 1, r / 45);
+        else if (L.kind === "diamond") this.diamond(ctx, 0, 0, r);
+        else if (L.kind === "luchos") this.luchosDraw(ctx, 0, 0, r);
+        else if (L.kind === "fan") this.fan(ctx, 0, r * .4, r * 1.3);
+        else this[L.kind] && this[L.kind](ctx, 0, 0, r);
+        box = [r * 2.4, r * 2.4];
+      } else if (L.type === "shape") {
+        const w = (L.w || .5) * W, h = L.kind === "line" ? 0 : (L.h || .1) * H; ctx.lineWidth = (L.width || 3) * s;
+        ctx.fillStyle = ctx.strokeStyle = paintStyle(w, Math.max(h, 10)); ctx.globalAlpha = (L.opacity ?? 100) / 100;
+        if (L.kind === "line") { ctx.beginPath(); ctx.moveTo(-w / 2, 0); ctx.lineTo(w / 2, 0); ctx.stroke(); }
+        else { ctx.beginPath(); if (L.kind === "ellipse") ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, 7); else ctx.rect(-w / 2, -h / 2, w, h); L.fill ? ctx.fill() : ctx.stroke(); }
+        box = [w, Math.max(h, 16 * s)];
+      }
+      if (box && this._screen && i === this.sel) { ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5; ctx.strokeStyle = "#e11d48"; ctx.globalAlpha = 1; ctx.shadowColor = "transparent"; ctx.strokeRect(-box[0] / 2 - 6, -box[1] / 2 - 6, box[0] + 12, box[1] + 12); }
+      ctx.restore();
+      boxes.push(box ? [x - box[0] / 2, y - box[1] / 2, box[0], box[1]] : null);
+    }
+    if (this._screen) this._boxes = boxes;
+  },
+  frontOffset() { const { front, spine } = this.dims(1); return this.d.wrap ? front + spine : 0; },
+  initDesign(el) {
+    const c = $("#cvCan", el), d = () => this.d;
+    const pos = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * c.width - this.frontOffset(), (e.clientY - r.top) / r.height * c.height]; };
+    let drag = null;
+    c.addEventListener("mousedown", e => {
+      const [x, y] = pos(e); const b = this._boxes || []; let hit = -1;
+      for (let i = b.length - 1; i >= 0; i--) if (b[i] && x >= b[i][0] - 8 && x <= b[i][0] + b[i][2] + 8 && y >= b[i][1] - 8 && y <= b[i][1] + b[i][3] + 8) { hit = i; break; }
+      this.sel = hit; if (hit >= 0) { const L = d().layers[hit]; drag = [x, y, L.x, L.y]; c.style.cursor = "grabbing"; }
+      this.layerPanel(); this.draw();
+    });
+    window.addEventListener("mousemove", e => {
+      if (!drag || this.sel < 0) return; const [x, y] = pos(e); const { front, H } = this.dims(1); const W = this.d.wrap ? front : this.dims(1).W;
+      const L = d().layers[this.sel]; L.x = Math.min(1, Math.max(0, drag[2] + (x - drag[0]) / W)); L.y = Math.min(1, Math.max(0, drag[3] + (y - drag[1]) / H)); this.draw();
+    });
+    window.addEventListener("mouseup", () => { if (drag) { drag = null; c.style.cursor = ""; this.layerPanel(); } });
+    document.addEventListener("keydown", e => {
+      if (App.current !== "cover" || this.sel < 0 || App.isTypingTarget(e.target)) return;
+      const L = d().layers[this.sel]; if (!L) return; const step = e.shiftKey ? .02 : .004;
+      if (e.key === "Delete" || e.key === "Backspace") { d().layers.splice(this.sel, 1); this.sel = -1; }
+      else if (e.key === "ArrowLeft") L.x -= step; else if (e.key === "ArrowRight") L.x += step; else if (e.key === "ArrowUp") L.y -= step; else if (e.key === "ArrowDown") L.y += step; else return;
+      e.preventDefault(); this.layerPanel(); this.draw();
+    });
+    const add = L => { d().layers.push({ x: .5, y: .5, ...L }); this.sel = d().layers.length - 1; this.layerPanel(); this.draw(); };
+    $("#cvAddText", el).onclick = () => add({ type: "text", text: "טקסט שלי", font: this.d.titleFont || "Frank Ruhl Libre", size: 48, color: "#b8892b", metal: true, shadow: true, bold: true });
+    $("#cvAddOrn", el).onchange = e => { if (e.target.value) add({ type: "orn", kind: e.target.value, size: 30, color: "#b8892b", metal: true }); e.target.value = ""; };
+    $("#cvAddShape", el).onchange = e => { if (e.target.value) add({ type: "shape", kind: e.target.value, w: .6, h: .12, color: "#b8892b", metal: true, fill: false, width: 3 }); e.target.value = ""; };
+    $("#cvAddImg", el).onclick = async () => { const f = (await App.pickFiles("image/*", false))[0]; if (f) add({ type: "image", src: await this.fileToData(f), w: .5, opacity: 100 }); };
+    $("#cvBgImg", el).onclick = async () => { const f = (await App.pickFiles("image/*", false))[0]; if (f) { this.d.bgImage = await this.fileToData(f, 2400); this.draw(); } };
+    $("#cvBgNo", el).onclick = () => { this.d.bgImage = null; this.draw(); };
+    this.sel = -1; this.layerPanel();
+  },
+  fileToData(file, max = 1600) {
+    return new Promise(res => { const r = new FileReader(); r.onload = () => { const im = new Image(); im.onload = () => {
+      const k = Math.min(1, max / Math.max(im.width, im.height)); const c = document.createElement("canvas"); c.width = im.width * k; c.height = im.height * k;
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height); res(c.toDataURL(/png/i.test(file.type) ? "image/png" : "image/jpeg", .9)); }; im.src = r.result; }; r.readAsDataURL(file); });
+  },
+  layerPanel() {
+    const ls = this.d.layers || [], el = $("#cvLayers"); if (!el) return;
+    const label = L => L.type === "text" ? "✏️ " + esc(String(L.text).slice(0, 24)) : L.type === "image" ? "🖼 picture" : L.type === "orn" ? "✦ " + L.kind : "▭ " + L.kind;
+    el.innerHTML = ls.map((L, i) => `<div class="list-item row small" data-i="${i}" style="${i === this.sel ? "background:var(--accent-soft)" : ""}"><span style="flex:1">${label(L)}</span><a href="#" data-up="${i}" title="bring forward">▲</a><a href="#" data-dn="${i}" title="send back">▼</a><a href="#" data-cp="${i}" title="duplicate">⧉</a><a href="#" data-rm="${i}" title="delete">✕</a></div>`).join("");
+    el.onclick = e => { const t = e.target; e.preventDefault();
+      const i = +(t.dataset.up ?? t.dataset.dn ?? t.dataset.cp ?? t.dataset.rm ?? t.closest("[data-i]")?.dataset.i ?? -1); if (i < 0) return;
+      if (t.dataset.up && i < ls.length - 1) { [ls[i], ls[i + 1]] = [ls[i + 1], ls[i]]; this.sel = i + 1; }
+      else if (t.dataset.dn && i > 0) { [ls[i], ls[i - 1]] = [ls[i - 1], ls[i]]; this.sel = i - 1; }
+      else if (t.dataset.cp) { ls.push({ ...ls[i], x: ls[i].x + .03, y: ls[i].y + .03 }); this.sel = ls.length - 1; }
+      else if (t.dataset.rm) { ls.splice(i, 1); this.sel = -1; } else this.sel = i;
+      this.layerPanel(); this.draw(); };
+    const L = ls[this.sel], P = $("#cvProps"); if (!L) { P.innerHTML = ""; return; }
+    const fonts = App.fontList();
+    const f = (k, lbl, html) => `<label class="small" style="display:block;margin-top:4px">${lbl} ${html}</label>`;
+    const num = (k, min, max, st = 1) => `<input type="range" data-k="${k}" min="${min}" max="${max}" step="${st}" value="${L[k] ?? 0}" style="width:150px">`;
+    P.innerHTML = `<div class="card" style="padding:8px;margin-top:6px">` +
+      (L.type === "text" ? f("text", "Text", `<textarea data-k="text" class="he-input" style="min-height:50px" dir="auto">${esc(L.text)}</textarea>`) +
+        f("font", "Font", `<select data-k="font">${fonts.map(x => `<option ${x === L.font ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>`) + f("size", "Size", num("size", 8, 200)) +
+        f("b", "", `<input type="checkbox" data-k="bold" ${L.bold ? "checked" : ""} style="width:auto"> bold <input type="checkbox" data-k="italic" ${L.italic ? "checked" : ""} style="width:auto"> italic <input type="checkbox" data-k="shadow" ${L.shadow ? "checked" : ""} style="width:auto"> shadow`) +
+        f("outline", "Outline colour", `<input type="color" data-k="outline" value="${L.outline || "#000000"}"> <a href="#" data-clear="outline">none</a>`) : "") +
+      (L.type === "image" ? f("w", "Width", num("w", .05, 1.2, .01)) + f("opacity", "Opacity", num("opacity", 5, 100)) + f("r", "", `<input type="checkbox" data-k="round" ${L.round ? "checked" : ""} style="width:auto"> oval frame <input type="checkbox" data-k="border" ${L.border ? "checked" : ""} style="width:auto"> border`) : "") +
+      (L.type === "orn" ? f("size", "Size", num("size", 5, 150)) : "") +
+      (L.type === "shape" ? f("w", "Width", num("w", .02, 1.2, .01)) + f("h", "Height", num("h", .01, 1, .01)) + f("width", "Line", num("width", 1, 20)) + f("opacity", "Opacity", num("opacity", 5, 100)) + f("fill", "", `<input type="checkbox" data-k="fill" ${L.fill ? "checked" : ""} style="width:auto"> filled`) : "") +
+      (L.type !== "image" || L.border ? f("color", "Colour", `<input type="color" data-k="color" value="${L.color || "#b8892b"}"> <input type="checkbox" data-k="metal" ${L.metal ? "checked" : ""} style="width:auto"> metallic`) : "") +
+      f("rotate", "Rotate", num("rotate", -180, 180)) + `</div>`;
+    P.oninput = e => { const k = e.target.dataset.k; if (!k) return; L[k] = e.target.type === "checkbox" ? e.target.checked : e.target.type === "range" ? +e.target.value : e.target.value; this.draw(); if (e.target.type === "checkbox") this.layerPanel(); };
+    P.onclick = e => { if (e.target.dataset.clear) { e.preventDefault(); L[e.target.dataset.clear] = ""; this.draw(); } };
+  },
   async save() { this.read(); const r = await App.api("ud_save", { table: "covers", row: { id: this.d.id, title: this.d.title || "Cover", data: JSON.stringify(this.d) } }); this.d.id = r.id; App.toast("Cover saved"); },
   async load(id) { const c = await App.api("ud_get", { table: "covers", id }); this.d = { ...this.defaults(), ...JSON.parse(c.data), id: c.id }; this.fill(); this.draw(); },
-  hiRes() { const c = document.createElement("canvas"); const { W, H } = this.dims(3); c.width = W; c.height = H; this.paintFull(c.getContext("2d"), 3); return c; },
+  hiRes() { const c = document.createElement("canvas"); const { W, H } = this.dims(3); c.width = W; c.height = H; this._screen = false; this.paintFull(c.getContext("2d"), 3); this._screen = true; return c; },
   exportPng() { const c = this.hiRes(); const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = (this.d.title || "cover") + ".png"; a.click(); },
   print() {
     const c = this.hiRes(); const img = new Image(); img.src = c.toDataURL("image/png"); img.className = "print-area"; img.style.width = "100%";

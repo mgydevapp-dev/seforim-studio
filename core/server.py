@@ -86,7 +86,88 @@ class App:
         self.last_ping = time.time()
         self._load_plugins()
         self.install = {"state": "idle", "progress": 0, "message": ""}
+        self.ai = {"state": "idle", "progress": 0, "message": ""}
+        self.ollama_proc = None
         self.check_library_install()
+        self.check_ai_install()
+        self.start_bundled_ollama()
+
+    # ------------------------------------------------------------------ bundled AI reader (Ollama + model)
+    def ai_dir(self):
+        return os.path.join(self.data, "ai")
+
+    def bundled_ollama(self):
+        for name in ("ollama.exe", "ollama"):
+            p = os.path.join(self.ai_dir(), "ollama", name)
+            if os.path.exists(p):
+                return p
+        return None
+
+    def start_bundled_ollama(self):
+        """Start the AI reader that ships with the app (only if no Ollama is already running)."""
+        exe = self.bundled_ollama()
+        if not exe:
+            return False
+        from scanner.engines import OllamaEngine
+        if OllamaEngine().models() is not None:
+            return True  # an Ollama is already running (bundled or the user's own)
+        env = dict(os.environ)
+        env["OLLAMA_MODELS"] = os.path.join(self.ai_dir(), "models")
+        env["OLLAMA_HOST"] = "127.0.0.1:11434"
+        env.setdefault("OLLAMA_KEEP_ALIVE", "15m")
+        try:
+            self.ollama_proc = winproc.popen([exe, "serve"], hidden=True, env=env, cwd=os.path.dirname(exe))
+            for _ in range(40):
+                time.sleep(0.5)
+                if OllamaEngine().models() is not None:
+                    print("Bundled AI reader started")
+                    return True
+        except Exception as e:  # noqa
+            print("Could not start the bundled AI reader:", e)
+        return False
+
+    def check_ai_install(self, extra_dir=None):
+        from . import installer
+        parts, expected = installer.find_parts(installer.search_dirs(os.path.dirname(self.data), self.data, extra_dir), installer.PACKS["ai"])
+        if not parts:
+            if expected:
+                self.ai.update(state="incomplete", message=f"Found only some parts of the AI pack (need all {expected}).")
+            return self.ai
+        if installer.already_installed(self.data, parts, "ai") or self.ai["state"] == "running":
+            return self.ai
+        self.ai.update(state="running", progress=0, message="Installing the AI handwriting reader (one time)…")
+
+        def run():
+            try:
+                tmp = self.ai_dir() + ".installing"
+                if os.path.isdir(tmp):
+                    shutil.rmtree(tmp, ignore_errors=True)
+                installer.extract_tar(parts, tmp, lambda x: self.ai.update(progress=round(x * 98, 1)))
+                src = os.path.join(tmp, "ai") if os.path.isdir(os.path.join(tmp, "ai")) else tmp
+                if self.ollama_proc:
+                    self.ollama_proc.terminate()
+                if os.path.isdir(self.ai_dir()):
+                    shutil.rmtree(self.ai_dir(), ignore_errors=True)
+                shutil.move(src, self.ai_dir())
+                shutil.rmtree(tmp, ignore_errors=True)
+                installer.mark_installed(self.data, parts, "ai")
+                started = self.start_bundled_ollama()
+                self.ai.update(state="done", progress=100,
+                               message="AI handwriting reader installed" + (" and running" if started else " (it starts with the app)"))
+            except Exception as e:  # noqa
+                traceback.print_exc()
+                self.ai.update(state="error", message=f"Could not install the AI reader: {e}")
+        threading.Thread(target=run, daemon=True).start()
+        return self.ai
+
+    def api_ai_status(self, a):
+        return {**self.ai, "bundled": bool(self.bundled_ollama()), "running": self.ollama_proc is not None and self.ollama_proc.poll() is None}
+
+    def api_ai_check(self, a):
+        r = self.check_ai_install(a.get("folder"))
+        if r["state"] != "running" and self.bundled_ollama():
+            self.start_bundled_ollama()
+        return r
 
     # ------------------------------------------------------------------ pre-built library install
     def check_library_install(self, extra_dir=None):
@@ -191,7 +272,7 @@ class App:
              "catalog": self.catalog.info() if self.catalog else None, "plugins": self.plugins,
              "share": {"enabled": self.share.enabled, "code": self.share.code, "ips": local_ips(),
                        "port": self.share_server.server_address[1] if self.share_server else None, "name": self.share.name},
-             "data_dir": self.data, "pin_set": bool(self.user.get_setting("pin_hash")), "install": self.install}
+             "data_dir": self.data, "pin_set": bool(self.user.get_setting("pin_hash")), "install": self.install, "ai": self.ai}
         s["settings"].pop("pin_hash", None)
         return s
 
@@ -859,6 +940,11 @@ class App:
         return {"ok": True}
 
     def api_quit(self, a):
+        if self.ollama_proc:
+            try:
+                self.ollama_proc.terminate()
+            except Exception:
+                pass
         threading.Timer(0.5, lambda: os._exit(0)).start()
         return {"ok": True}
 

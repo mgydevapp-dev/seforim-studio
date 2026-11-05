@@ -102,7 +102,7 @@ def _similar(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio() > 0.8
 
 
-def _to_png_b64(img, max_side=1800):
+def _to_png_b64(img, max_side=1400):
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     h, w = img.shape[:2]
@@ -124,7 +124,7 @@ def imread(path):
 class OllamaEngine:
     key, name = "ollama", "A · Local AI vision (Ollama)"
 
-    def __init__(self, model=None, url=OLLAMA_URL, timeout=600):
+    def __init__(self, model=None, url=OLLAMA_URL, timeout=1800):
         self.url, self.timeout = url, timeout
         self.model = model
 
@@ -156,7 +156,7 @@ class OllamaEngine:
         except Exception:
             vis = None
         if vis is None:
-            return False, "Ollama is not running (install from ollama.com, then run: ollama pull qwen3-vl:8b)"
+            return False, "AI pack not installed - download the SeforimAI.tar.part files into Downloads and press 'Install AI pack'"
         if not vis:
             return False, "Ollama is running but no vision model is installed. Run: ollama pull qwen3-vl:8b"
         return True, f"model {self.pick_model()}"
@@ -210,6 +210,8 @@ class KrakenEngine:
         return None
 
     def available(self):
+        if os.name == "nt":
+            return False, "Kraken does not run on Windows (only Mac/Linux) - the AI reader (A) is the best choice for handwriting"
         try:
             import kraken  # noqa
         except Exception:

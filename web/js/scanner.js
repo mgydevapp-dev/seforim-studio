@@ -53,6 +53,18 @@ const Scanner = {
     const sel = $("#scEngine"); sel.innerHTML = `<option value="auto">Automatic (best installed)</option>` + es.map(e => `<option value="${e.key}" ${e.ok ? "" : "disabled"}>${esc(e.name)}${e.ok ? "" : " — not installed"}</option>`).join("") + `<option value="none">Image cleanup only</option>`;
     if (!es.some(e => e.ok)) sel.value = "none";
     $("#scEng").innerHTML = es.map(e => `<div>${e.ok ? "✅" : "⚪"} <b>${esc(e.name)}</b> — <span class="muted">${esc(e.info)}</span>${e.key === "ollama" && e.models.length > 1 ? ` <select id="scOm">${e.models.map(m => `<option ${m === App.state.settings.ollama_model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>` : ""}</div>`).join("") + `<a href="#" id="scRef" class="small">re-check</a>`;
+    const ai = await App.api("ai_status");
+    if (ai.state === "running") {
+      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="card" style="background:var(--gold-soft)">⏳ ${esc(ai.message)} ${Math.round(ai.progress || 0)}%</div>`);
+      setTimeout(() => this.loadEngines(), 2000);
+    } else if (!es.find(e => e.key === "ollama").ok) {
+      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="card" style="background:var(--gold-soft);margin-bottom:6px">
+        <b>For handwriting, install the AI pack (one time):</b> download the <b>SeforimAI.tar.part…</b> files into your Downloads folder, then
+        <button class="btn small primary" id="scAiInst">Install AI pack</button> ${ai.message ? `<div class="small">${esc(ai.message)}</div>` : ""}
+        ${ai.bundled ? `<div class="small">The AI pack is installed but not running yet — <a href="#" id="scAiStart">start it</a>.</div>` : ""}</div>`);
+      $("#scAiInst").onclick = async () => { const r = await App.api("ai_check"); App.toast(r.message || (r.state === "idle" ? "No AI pack found in Downloads, Desktop or the app folder" : r.state)); this.loadEngines(); };
+      if ($("#scAiStart")) $("#scAiStart").onclick = async e => { e.preventDefault(); App.toast("Starting the AI reader…"); await App.api("ai_check"); this.loadEngines(); };
+    }
     $("#scRef").onclick = e => { e.preventDefault(); this.loadEngines(); };
     if ($("#scOm")) $("#scOm").onchange = e => App.setSetting("ollama_model", e.target.value);
   },

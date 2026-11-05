@@ -11,7 +11,14 @@ import os
 import re
 import sqlite3
 
-PART_RE = re.compile(r"SeforimLibrary\.sqlite\.xz(?:\.part(\d+)of(\d+))?$", re.I)
+PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar"}
+
+
+def _part_re(base):
+    return re.compile(re.escape(base) + r"(?:\.part(\d+)of(\d+))?$", re.I)
+
+
+PART_RE = _part_re(PACKS["library"])
 
 
 def search_dirs(app_dir, data_dir, extra=None):
@@ -26,14 +33,15 @@ def search_dirs(app_dir, data_dir, extra=None):
     return out
 
 
-def find_parts(dirs):
+def find_parts(dirs, base=PACKS["library"]):
     """Return (list of part paths in order, total parts expected) for the first complete set found."""
+    rx = _part_re(base)
     for d in dirs:
         files = {}
         single = None
         expected = None
-        for p in glob.glob(os.path.join(d, "SeforimLibrary.sqlite.xz*")):
-            m = PART_RE.search(os.path.basename(p))
+        for p in glob.glob(os.path.join(d, base + "*")):
+            m = rx.search(os.path.basename(p))
             if not m:
                 continue
             if m.group(1) is None:
@@ -54,8 +62,8 @@ def signature(parts):
     return [[os.path.basename(p), os.path.getsize(p)] for p in parts]
 
 
-def already_installed(data_dir, parts):
-    f = os.path.join(data_dir, "installed_library.json")
+def already_installed(data_dir, parts, pack="library"):
+    f = os.path.join(data_dir, f"installed_{pack}.json")
     try:
         with open(f, encoding="utf-8") as fh:
             return json.load(fh) == signature(parts)
@@ -63,8 +71,8 @@ def already_installed(data_dir, parts):
         return False
 
 
-def mark_installed(data_dir, parts):
-    with open(os.path.join(data_dir, "installed_library.json"), "w", encoding="utf-8") as fh:
+def mark_installed(data_dir, parts, pack="library"):
+    with open(os.path.join(data_dir, f"installed_{pack}.json"), "w", encoding="utf-8") as fh:
         json.dump(signature(parts), fh)
 
 
@@ -128,4 +136,64 @@ def copy_user_works(old_path, new_lib):
         n += 1
     db.commit()
     old.close()
+    return n
+
+
+class _Concat:
+    """Read several files one after another as if they were one (for split downloads)."""
+
+    def __init__(self, parts, progress=None):
+        self.parts, self.i, self.f = list(parts), 0, None
+        self.total = sum(os.path.getsize(p) for p in parts) or 1
+        self.done, self.progress = 0, progress
+
+    def read(self, n=-1):
+        out = b""
+        while n < 0 or len(out) < n:
+            if self.f is None:
+                if self.i >= len(self.parts):
+                    break
+                self.f = open(self.parts[self.i], "rb")
+                self.i += 1
+            chunk = self.f.read(-1 if n < 0 else n - len(out))
+            if not chunk:
+                self.f.close()
+                self.f = None
+                continue
+            out += chunk
+        self.done += len(out)
+        if self.progress:
+            self.progress(self.done / self.total)
+        return out
+
+
+def extract_tar(parts, dest, progress=None):
+    """Unpack a (split) .tar download into dest, safely (no paths outside dest)."""
+    import tarfile
+    os.makedirs(dest, exist_ok=True)
+    root = os.path.abspath(dest)
+    n = 0
+    with tarfile.open(fileobj=_Concat(parts, progress), mode="r|") as t:
+        for m in t:
+            target = os.path.abspath(os.path.join(dest, m.name))
+            if not (target == root or target.startswith(root + os.sep)) or m.issym() or m.islnk():
+                continue
+            if m.isdir():
+                os.makedirs(target, exist_ok=True)
+                continue
+            if not m.isfile():
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            src = t.extractfile(m)
+            with open(target, "wb") as out:
+                while True:
+                    b = src.read(4 << 20)
+                    if not b:
+                        break
+                    out.write(b)
+            try:
+                os.chmod(target, (m.mode & 0o777) | 0o600)
+            except OSError:
+                pass
+            n += 1
     return n

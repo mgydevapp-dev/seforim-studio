@@ -13,6 +13,6 @@ def run(cmd, timeout=None, text=True):
                           **({"text": True, "encoding": "utf-8", "errors": "replace"} if text else {}))
 
 
-def popen(cmd, hidden=False):
+def popen(cmd, hidden=False, env=None, cwd=None):
     return subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                            creationflags=NO_WINDOW if hidden else 0)
+                            creationflags=NO_WINDOW if hidden else 0, env=env, cwd=cwd)
