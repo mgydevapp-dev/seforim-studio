@@ -159,6 +159,7 @@ def gui():
             try:
                 exe = run_all(dest, v_sc.get(), v_fo.get(), log, lambda f: root.after(0, lambda: bar.config(value=f * 100)))
                 lib = library_parts_hint()
+                log("When the library and AI have installed, use Settings -> Backup -> 'Make the complete zip' to get ONE zip for any offline computer.")
                 log("Library download found — it will be installed when the app starts." if lib else
                     "Tip: download the two SeforimLibrary…part files and put them in the install folder (or leave them in Downloads).")
                 if v_go.get():

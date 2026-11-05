@@ -570,6 +570,53 @@ class App:
     def api_restore(self, a):
         return {"ok": self.user.restore(self._upload_path(a["upload"]))}
 
+    def api_make_bundle(self, a):
+        """Make ONE zip with everything (app + library + AI reader + fonts + notes) to copy to an offline computer."""
+        import zipfile
+        app_dir = os.path.dirname(os.path.abspath(self.data))
+        dest = a.get("dest") or os.path.join(os.path.expanduser("~"), "Desktop", "SeforimStudio-Complete.zip")
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        skip_dirs = {os.path.join(self.data, d) for d in ("window_profile", "uploads", "scans", "exports", "inbox", "backups")}
+
+        def run(progress=None, cancel=None):
+            files = []
+            for root, dirs, fs in os.walk(app_dir):
+                if any(root == d or root.startswith(d + os.sep) for d in skip_dirs) or root.endswith(".installing"):
+                    dirs[:] = []
+                    continue
+                for f in fs:
+                    p = os.path.join(root, f)
+                    if os.path.abspath(p) == os.path.abspath(dest) or f.endswith((".part", "-wal", "-shm")) or f == "app_log.txt" \
+                            or f.startswith(("SeforimLibrary.sqlite.xz", "SeforimAI.tar")):
+                        continue
+                    files.append(p)
+            total = sum(os.path.getsize(p) for p in files) or 1
+            done = 0
+            with self.lib.lock:  # flush everything into the main library file first
+                self.lib.db.commit()
+                try:
+                    self.lib.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except Exception:
+                    pass
+            if True:
+                with zipfile.ZipFile(dest + ".part", "w", zipfile.ZIP_DEFLATED, allowZip64=True, compresslevel=1) as z:
+                    for p in files:
+                        if cancel and cancel():
+                            break
+                        rel = os.path.join("SeforimStudio", os.path.relpath(p, app_dir))
+                        # already-compressed data (AI model, pictures, fonts) is stored as-is: much faster
+                        packed = p.lower().endswith((".gguf", ".zip", ".png", ".jpg", ".woff2", ".ttf", ".dll", ".exe", ".pyd")) or os.sep + "blobs" + os.sep in p
+                        z.write(p, rel, compress_type=zipfile.ZIP_STORED if packed else zipfile.ZIP_DEFLATED)
+                        done += os.path.getsize(p)
+                        if progress:
+                            progress(done, total, os.path.basename(p))
+            if cancel and cancel():
+                os.remove(dest + ".part")
+                return {"cancelled": True}
+            os.replace(dest + ".part", dest)
+            return {"path": dest, "size_gb": round(os.path.getsize(dest) / 1e9, 2), "files": len(files)}
+        return {"job": self.jobs.start(run), "dest": dest}
+
     def api_export_user(self, a):
         p = self.export_path(f"my-data-{self.user.profile}-{dt.date.today()}.json")
         with open(p, "w", encoding="utf-8") as f:

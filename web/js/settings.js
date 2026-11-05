@@ -111,10 +111,23 @@ const Settings = {
   t_backup(el) {
     el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">Backup</h2><p class="small">Saves all profiles (notes, documents, bookmarks, covers, sheets, settings) into one .zip — copy it to a USB stick or another drive.</p>
       <div class="row"><input id="bDir" placeholder="Folder (blank = data\\backups)" style="flex:1"><button class="btn primary" id="bGo">Back up now</button></div><button class="btn" id="bRes" style="margin-top:8px">Restore from a backup .zip…</button></div>
+      <div class="card" style="grid-column:1/-1;background:var(--gold-soft)"><h2 style="margin-top:0">📦 One complete zip for another computer</h2>
+        <p class="small">Makes <b>one file</b> with everything — the app, the whole library, the AI handwriting reader, all fonts and your notes. Copy it to any offline computer (USB / external drive), right-click → <b>Extract All</b>, and double-click <b>SeforimStudio.exe</b> inside. Nothing to install there.</p>
+        <div class="row"><input id="bzDest" style="flex:1" placeholder="Where to save (blank = Desktop\SeforimStudio-Complete.zip — or type a USB drive, e.g. E:\SeforimStudio-Complete.zip)">
+          <button class="btn gold" id="bzGo">📦 Make the complete zip</button></div>
+        <div class="progress hidden" id="bzProg" style="margin-top:8px"><div></div></div><p class="small" id="bzMsg"></p></div>
       <div class="card"><h2 style="margin-top:0">Export / import my data</h2><p class="small">One readable JSON file with everything in this profile — to move to another computer or keep as an archive.</p>
       <div class="row"><button class="btn" id="bExp">⤓ Export all my data</button><button class="btn" id="bImp">📥 Import data file…</button></div></div></div>`;
     $("#bGo").onclick = async () => { const r = await App.api("backup", { dir: $("#bDir").value.trim() }); App.toast("Backup saved: " + r.path); if (r.url) App.download(r.url); };
     $("#bRes").onclick = async () => { const u = await App.uploadPicked(".zip", false); if (!u.length || !await App.confirm("Restore will replace your current notes with the backup (your current data is kept as .before-restore). Continue?")) return; await App.api("restore", { upload: u[0].upload }); location.reload(); };
+    $("#bzGo").onclick = async () => {
+      const r = await App.api("make_bundle", { dest: $("#bzDest").value.trim() || null });
+      $("#bzProg").classList.remove("hidden"); $("#bzGo").disabled = true;
+      $("#bzMsg").textContent = "Making " + r.dest + " … (big library + AI: this can take 5–15 minutes)";
+      const res = await App.job(r.job, s => { $("#bzProg div").style.width = (s.total ? 100 * s.progress / s.total : 1) + "%"; }).catch(() => null);
+      $("#bzGo").disabled = false;
+      if (res && res.path) { $("#bzMsg").innerHTML = `✅ Done: <b>${esc(res.path)}</b> (${res.size_gb} GB). Copy this one file to the other computer, Extract All, run SeforimStudio.exe.`; App.api("open_folder", { path: res.path }); }
+    };
     $("#bExp").onclick = async () => { const r = await App.api("export_user"); App.download(r.url); };
     $("#bImp").onclick = async () => { const u = await App.uploadPicked(".json", false); if (!u.length) return; const r = await App.api("import_user", { upload: u[0].upload }); App.toast(`Imported ${r.imported} items`); };
   },
