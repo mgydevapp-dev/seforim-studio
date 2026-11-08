@@ -92,9 +92,11 @@ class App:
         self._load_plugins()
         self.install = {"state": "idle", "progress": 0, "message": ""}
         self.ai = {"state": "idle", "progress": 0, "message": ""}
+        self.more = {"state": "idle", "progress": 0, "message": ""}
         self.ollama_proc = None
         self.check_library_install()
         self.check_ai_install()
+        self.check_more_install()
         self.start_bundled_ollama()
 
     # ------------------------------------------------------------------ bundled AI reader (Ollama + model)
@@ -363,6 +365,8 @@ class App:
                 installer.mark_installed(self.shared, parts)
                 self._cleanup_parts(parts)
                 self.install.update(state="done", progress=100, message=f"Library installed: {n:,} seforim" + (f" (kept {kept} of your own)" if kept else ""))
+                installer.forget_installed(self.shared, "more")  # the new library needs the extra seforim added again
+                self.check_more_install()
             except Exception as e:  # noqa
                 traceback.print_exc()
                 self.install.update(state="error", message=f"Could not install the library: {e}")
@@ -395,7 +399,8 @@ class App:
         rows.sort(key=lambda r: -r["total"])
         if self.install["state"] in ("idle", "missing", "incomplete", "error"):
             self.check_library_install()
-        return {"rows": rows, "total": sum(cat.values()), "have": sum(have.values()), "install": self.install,
+        more_n = self.lib.q1("SELECT COUNT(*) n FROM works WHERE source='otzaria'")["n"]
+        return {"rows": rows, "total": sum(cat.values()), "have": sum(have.values()), "install": self.install, "more": self.more, "more_n": more_n,
                 "online_download": self.dl.state.get("running", False) if self.dl else False}
 
     def _cleanup_parts(self, parts):
@@ -412,7 +417,51 @@ class App:
         return self.install
 
     def api_install_check(self, a):
-        return self.check_library_install(a.get("folder"))
+        r = self.check_library_install(a.get("folder"))
+        m = self.check_more_install(a.get("folder"))
+        if r["state"] in ("missing", "done", "idle") and m["state"] == "running":
+            return {**m, "message": "Adding the extra seforim…"}
+        return r
+
+    # ------------------------------------------------------------------ the "more seforim" pack (Otzaria)
+    def check_more_install(self, extra_dir=None):
+        from . import installer
+        if self.more["state"] == "running" or self.install["state"] == "running":
+            return self.more
+        found = installer.scan(installer.search_dirs(os.path.dirname(self.data), self.shared, extra_dir or getattr(self, "_extra_dir", None)),
+                               installer.PACKS["more"])
+        parts = found["parts"]
+        if not parts:
+            if found["problem"]:
+                self.more.update(state="incomplete", message=found["problem"])
+            return self.more
+        if installer.already_installed(self.shared, parts, "more"):
+            return self.more
+        need, free = installer.free_space(parts, self.shared, ratio=10)
+        if free < need:
+            self.more.update(state="error", message=f"Not enough free disk space for the extra seforim: needs about {need / 1e9:.0f} GB.")
+            return self.more
+        self.more.update(state="running", progress=0, message="Adding thousands of extra seforim to the library (one time)…")
+
+        def run():
+            tmp = os.path.join(self.shared, "more.installing.sqlite")
+            try:
+                installer.decompress(parts, tmp, lambda x: self.more.update(progress=round(x * 40, 1)))
+                n = installer.merge_pack(self.lib, tmp, lambda x: self.more.update(progress=round(40 + x * 59, 1)))
+                installer.mark_installed(self.shared, parts, "more")
+                self._cleanup_parts(parts)
+                self.more.update(state="done", progress=100, message=f"Added {n:,} more seforim")
+            except Exception as e:  # noqa
+                traceback.print_exc()
+                self.more.update(state="error", message=f"Could not add the extra seforim: {e}")
+            finally:
+                for f in (tmp, tmp + "-wal", tmp + "-shm"):
+                    try:
+                        os.remove(f)
+                    except OSError:
+                        pass
+        threading.Thread(target=run, daemon=True).start()
+        return self.more
 
     def _last_profile(self):
         p = os.path.join(self.data, "profiles", "_last.txt")
@@ -495,7 +544,28 @@ class App:
     def api_catalog_tree(self, a):
         if not self.catalog:
             return {"tree": [], "imported": []}
-        return {"tree": self.catalog.tree(), "imported": [w["id"] for w in self.lib.q("SELECT id FROM works")],
+        tree = self.catalog.tree()
+        extra = self.lib.q("SELECT id, title, he_title, category_path FROM works WHERE source='otzaria' ORDER BY category_path, title")
+        if extra:
+            top = {"name": "More seforim", "he": "ספרים נוספים", "path": "More seforim", "children": [], "works": [], "count": 0}
+            index = {"More seforim": top}
+            for w in extra:
+                parts = (w["category_path"] or "More seforim").split(" > ")
+                node = top
+                for k in range(1, len(parts)):
+                    path = " > ".join(parts[:k + 1])
+                    if path not in index:
+                        child = {"name": parts[k], "he": parts[k], "path": path, "children": [], "works": [], "count": 0}
+                        node["children"].append(child)
+                        index[path] = child
+                    node = index[path]
+                node["works"].append({"id": w["id"], "title": w["title"], "he": w["he_title"] or w["title"], "has_he": True, "has_en": False})
+            def count(n):
+                n["count"] = len(n["works"]) + sum(count(c) for c in n["children"])
+                return n["count"]
+            count(top)
+            tree = tree + [top]
+        return {"tree": tree, "imported": [w["id"] for w in self.lib.q("SELECT id FROM works")],
                 "favorites": [r["work_id"] for r in self.user.list("favorites")],
                 "hidden": [r["work_id"] for r in self.user.list("hidden")]}
 

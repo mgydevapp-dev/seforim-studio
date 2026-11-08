@@ -147,7 +147,7 @@ def copy_packs(dest, log=print):
     where the app installs them on first start - so the whole thing works on an offline computer."""
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
     n = 0
-    for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimAI.tar*")):
+    for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimAI.tar*")) + glob.glob(os.path.join(here, "SeforimMore.sqlite.xz*")):
         if p.lower().endswith((".crdownload", ".partial", ".download", ".tmp", ".opdownload")):
             log(f"{os.path.basename(p)} has not finished downloading - skipped")
             continue

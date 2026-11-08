@@ -11,7 +11,7 @@ import os
 import re
 import sqlite3
 
-PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar"}
+PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar", "more": "SeforimMore.sqlite.xz"}
 
 
 PART_SIZE = 1900 * 1024 * 1024  # every part except the last one is exactly this big (split -b 1900M)
@@ -130,6 +130,13 @@ def already_installed(data_dir, parts, pack="library"):
 def mark_installed(data_dir, parts, pack="library"):
     with open(os.path.join(data_dir, f"installed_{pack}.json"), "w", encoding="utf-8") as fh:
         json.dump(signature(parts), fh)
+
+
+def forget_installed(data_dir, pack):
+    try:
+        os.remove(os.path.join(data_dir, f"installed_{pack}.json"))
+    except OSError:
+        pass
 
 
 def decompress(parts, dest, progress=None):
@@ -253,3 +260,38 @@ def extract_tar(parts, dest, progress=None):
                 pass
             n += 1
     return n
+
+
+def merge_pack(lib, pack_path, progress=lambda f: None):
+    """Add every sefer of a pack library (e.g. the 'more seforim' pack) into the main library, with search indexes.
+    Seforim already there (same id) are replaced. Returns the number of seforim added."""
+    import sqlite3
+    from .library import skeleton
+    src = sqlite3.connect(pack_path)
+    src.row_factory = sqlite3.Row
+    works = src.execute("SELECT * FROM works").fetchall()
+    total = src.execute("SELECT COUNT(*) FROM passages").fetchone()[0] or 1
+    done = 0
+    cols = [d[1] for d in src.execute("PRAGMA table_info(works)")]
+    with lib.lock:
+        db = lib.db
+        for w in works:
+            lib.delete_work(w["id"], commit=False)
+            db.execute(f"INSERT OR REPLACE INTO works({','.join(cols)}) VALUES({','.join('?' * len(cols))})", tuple(w[c] for c in cols))
+            for r in src.execute("SELECT work_id,seq,node,chapter,verse,ref,he,en,he_plain,initials,finals FROM passages WHERE work_id=? ORDER BY seq", (w["id"],)):
+                cur = db.execute("INSERT INTO passages(work_id,seq,node,chapter,verse,ref,he,en,he_plain,initials,finals) VALUES(?,?,?,?,?,?,?,?,?,?,?)", tuple(r))
+                pid = cur.lastrowid
+                if r["he_plain"]:
+                    db.execute("INSERT INTO fts_he(rowid,he_plain,he_skel) VALUES(?,?,?)", (pid, r["he_plain"], " ".join(skeleton(x) for x in r["he_plain"].split())))
+                if r["en"]:
+                    db.execute("INSERT INTO fts_en(rowid,en) VALUES(?,?)", (pid, r["en"]))
+                done += 1
+                if done % 20000 == 0:
+                    progress(done / total)
+        for r in src.execute("SELECT word,freq,g_std,g_gadol,g_katan,g_ord,skel FROM words"):
+            db.execute("INSERT INTO words(word,freq,g_std,g_gadol,g_katan,g_ord,skel) VALUES(?,?,?,?,?,?,?) "
+                       "ON CONFLICT(word) DO UPDATE SET freq=freq+excluded.freq", tuple(r))
+        db.commit()
+    src.close()
+    progress(1.0)
+    return len(works)

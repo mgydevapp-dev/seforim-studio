@@ -101,7 +101,7 @@ jobs:
           $notes = @"
           **Seforim Studio - portable Windows app (no install, works offline)**
 
-          1. Download ALL the files below into ONE folder (e.g. Downloads, or a USB stick): **SeforimStudio-Setup.exe**, every **SeforimLibrary.sqlite.xz.part...** (the complete library) and every **SeforimAI.tar.part...** (the AI handwriting reader).
+          1. Download ALL the files below into ONE folder (e.g. Downloads, or a USB stick): **SeforimStudio-Setup.exe**, every **SeforimLibrary.sqlite.xz.part...** (the complete library) and every **SeforimAI.tar.part...** (the AI handwriting reader) and, for thousands more seforim, every **SeforimMore.sqlite.xz.part...**.
           2. Double-click **SeforimStudio-Setup.exe** -> Install. It makes a Desktop shortcut, installs the Hebrew fonts into Windows (for Word too) and starts the app.
           3. On first start the app finds the library and AI parts in Downloads and installs them once (a few minutes). Then you may delete the part files.
           4. For an OFFLINE computer: copy that same folder of files (USB stick) to it and double-click SeforimStudio-Setup.exe there - no internet needed. Or in the app: Settings > Backup > "Make the complete zip".
@@ -183,6 +183,40 @@ jobs:
           git init -q -b ci-results-big; git config user.name build-bot; git config user.email build-bot@users.noreply.github.com
           git add -A; git commit -q -m "Big library sweep ${{ github.sha }}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-results-big
+
+  more:
+    # the "more seforim" pack from the Otzaria library - put "[more]" in the commit message
+    if: contains(github.event.head_commit.message, '[more]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost; df -h /
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Get the Otzaria library (books only)
+        run: |
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/Sivan22/otzaria-library.git otz
+          cd otz && git sparse-checkout set "אוצריא" && cd ..
+          find otz/אוצריא -name "*.txt" | wc -l; du -sh otz/אוצריא
+          ls otz/אוצריא
+      - name: Build the pack (skips seforim the main library already has)
+        run: python tools/import_otzaria.py "otz/אוצריא" --out build/more.sqlite
+      - name: Compress, split, publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd build; ls -la
+          xz -T0 -6 -c more.sqlite > SeforimMore.sqlite.xz; rm more.sqlite
+          split -b 1900M -d -a 1 SeforimMore.sqlite.xz part_
+          n=$(ls part_* | wc -l); i=1
+          for f in $(ls part_* | sort); do mv "$f" "SeforimMore.sqlite.xz.part${i}of${n}"; i=$((i+1)); done
+          rm SeforimMore.sqlite.xz; ls -la
+          R="--repo ${{ github.repository }}"
+          for a in $(gh release view latest $R --json assets -q '.assets[].name' | grep '^SeforimMore' || true); do gh release delete-asset latest "$a" -y $R; done
+          gh release upload latest SeforimMore.sqlite.xz.part* more_report.txt --clobber $R
 
   cursive:
     # trains the offline reader for Hebrew cursive handwriting (כתב) - put "[cursive]" in the commit message

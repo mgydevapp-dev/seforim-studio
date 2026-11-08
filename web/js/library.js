@@ -75,7 +75,7 @@ const Library = {
   async loadTree() {
     const r = await App.api("catalog_tree");
     this.tree = r.tree; this.imported = new Set(r.imported); this.favorites = new Set(r.favorites); this.hidden = new Set(r.hidden);
-    this.userWorks = (await App.api("lib_works")).filter(w => w.source === "user" || !this.inCatalog(w.id));
+    this.userWorks = (await App.api("lib_works")).filter(w => w.source === "user" || (w.source !== "otzaria" && !this.inCatalog(w.id)));
     this.drawTree();
     this.drawHealth();
   },
@@ -83,6 +83,11 @@ const Library = {
   async drawHealth() {
     const el = $("#libHealth"); if (!el) return;
     const h = await App.api("library_health").catch(() => null);
+    if (h && h.more && h.more.state === "running") {
+      el.innerHTML = `<div class="lib-health"><b>📚 Adding thousands of extra seforim…</b><div class="progress" style="height:10px;margin:6px 0"><div style="width:${h.more.progress || 0}%"></div></div><div class="small">${Math.round(h.more.progress || 0)}% — keep the app open.</div></div>`;
+      clearTimeout(this._lh); this._lh = setTimeout(() => this.drawHealth(), 3000); this._wasMore = true; return;
+    }
+    if (this._wasMore) { this._wasMore = false; App.toast(h.more.message || "Extra seforim added"); return this.loadTree(); }
     if (!h || !h.total || h.have >= h.total * 0.95) { el.innerHTML = ""; return; }
     const st = h.install || {}, miss = h.rows.filter(r => r.have < r.total);
     const running = st.state === "running";
@@ -94,7 +99,8 @@ const Library = {
       : `<div class="small lh-msg">${esc(st.message || "")}</div>
       <div class="small">To get <b>everything</b> (Talmud, all seforim): download <b>both</b> files
         <code>SeforimLibrary.sqlite.xz.part1of2</code> (1.99 GB) and <code>…part2of2</code> (0.35 GB) from the download page into your
-        <b>Downloads</b> folder (or onto the USB stick next to SeforimStudio-Setup.exe), then press <b>Install now</b>. About 11 GB of free disk space is needed.</div>
+        <b>Downloads</b> folder (or onto the USB stick next to SeforimStudio-Setup.exe), then press <b>Install now</b>. About 11 GB of free disk space is needed.
+        ${h.more_n ? "" : `<br>➕ For <b>thousands more seforim</b> (Otzaria: Dicta, Torat Emet, Wikisource…) also download the <code>SeforimMore.sqlite.xz.part…</code> files — they are added automatically.`}</div>
       <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="btn small primary" id="lhFind">Install now</button>
         <input id="lhDir" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
