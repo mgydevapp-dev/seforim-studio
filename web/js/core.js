@@ -89,12 +89,16 @@ const App = {
   },
   buildRail() {
     const r = $("#rail"); r.innerHTML = "";
-    const order = [...this.order.filter(i => i !== "plugins" && i !== "settings"), "plugins", "settings"].filter(i => this.pages[i]);
-    for (const id of order) {
-      const p = this.pages[id];
+    const CORE = ["home", "library", "search", "gematria", "roshei", "analysis", "tools", "calendar", "notes", "mylib", "cover", "scanner", "share"];
+    const core = this.order.filter(i => CORE.includes(i));
+    const addons = this.order.filter(i => !CORE.includes(i) && i !== "plugins" && i !== "settings");
+    const add = id => { const p = this.pages[id]; if (!p) return;
       const b = h(`<button data-id="${id}" title="${esc(p.title)}"><span class="ic">${p.icon}</span><span>${esc(this.t(p.title))}</span></button>`);
-      b.onclick = () => this.show(id); r.appendChild(b);
-    }
+      b.onclick = () => this.show(id); r.appendChild(b); };
+    core.forEach(add);
+    if (addons.length) { r.appendChild(h(`<div class="rail-sep" title="Add-ons">Add-ons</div>`)); addons.forEach(add); }
+    r.appendChild(h(`<div class="rail-fill"></div>`));
+    ["plugins", "settings"].forEach(add);
   },
 
   /* ---------------- Hebrew keyboard (English keys type Hebrew) ---------------- */

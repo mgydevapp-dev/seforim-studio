@@ -309,4 +309,4 @@ def parasha(d: dt.date, israel=False, hebrew=False):
         return parshios.getparsha_string(dates.GregorianDate(sat.year, sat.month, sat.day),
                                          israel=israel, hebrew=hebrew) or ("No regular parasha (Yom Tov)" if not hebrew else "שבת יום טוב")
     except Exception:
-        return "(install 'pyluach' for parasha: pip install pyluach)"
+        return ""
