@@ -304,3 +304,10 @@ input:focus, textarea:focus, select:focus { outline: none; box-shadow: 0 0 0 3px
 ::-webkit-scrollbar-track { background: transparent; }
 .toast { border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
 #modal { border-radius: 16px; }
+#osk { direction: ltr; }
+#osk .krow { justify-content: flex-start; }
+#osk button { position: relative; min-width: 44px; height: 44px; }
+#osk .kh { font-family: var(--he-font); font-size: 22px; line-height: 1; }
+#osk .ke { position: absolute; left: 4px; top: 2px; font: 10px var(--ui-font); color: var(--muted); text-transform: uppercase; }
+#osk .osk-head { display: flex; gap: 10px; align-items: baseline; padding: 0 4px 6px; }
+.ed-page [data-ph]:only-child:empty::before, .ed-page h1[data-ph]:has(> br:only-child)::before, .ed-page p[data-ph]:has(> br:only-child)::before { content: attr(data-ph); color: var(--muted); opacity: .6; pointer-events: none; }

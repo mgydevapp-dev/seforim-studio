@@ -154,12 +154,16 @@ const App = {
     $$(".top-actions button").forEach(b => b.addEventListener("mousedown", e => e.preventDefault()));
   },
   initOSK() {
-    const rows = [["/", "'", "ק", "ר", "א", "ט", "ו", "ן", "ם", "פ"], ["ש", "ד", "ג", "כ", "ע", "י", "ח", "ל", "ך", "ף"], ["ז", "ס", "ב", "ה", "נ", "מ", "צ", "ת", "ץ", "."]];
+    // exactly like a Hebrew (Israeli standard) keyboard; the small letter is the English key under it
+    const rows = [[["/", "q"], ["'", "w"], ["ק", "e"], ["ר", "r"], ["א", "t"], ["ט", "y"], ["ו", "u"], ["ן", "i"], ["ם", "o"], ["פ", "p"]],
+      [["ש", "a"], ["ד", "s"], ["ג", "d"], ["כ", "f"], ["ע", "g"], ["י", "h"], ["ח", "j"], ["ל", "k"], ["ך", "l"], ["ף", ";"], [",", "'"]],
+      [["ז", "z"], ["ס", "x"], ["ב", "c"], ["ה", "v"], ["נ", "b"], ["מ", "n"], ["צ", "m"], ["ת", ","], ["ץ", "."], [".", "/"]]];
     const nikud = [["ְ", "Sheva"], ["ֱ", "Chataf segol"], ["ֲ", "Chataf patach"], ["ֳ", "Chataf kamatz"], ["ִ", "Chirik"], ["ֵ", "Tzeirei"], ["ֶ", "Segol"],
       ["ַ", "Patach"], ["ָ", "Kamatz"], ["ֹ", "Cholam"], ["ֻ", "Kubutz"], ["ּ", "Dagesh"], ["ׁ", "Shin dot"], ["ׂ", "Sin dot"]];
     const marks = ["״", "׳", "־", "׃", "׀", "₪", "{פ}", "{ס}", "(", ")", "?", "!"];
     const k = $("#osk");
-    k.innerHTML = rows.map(r => `<div class="krow">${r.map(c => `<button data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`).join("")
+    k.innerHTML = `<div class="osk-head"><b>Hebrew keyboard</b><span class="small muted">same keys as your real keyboard (the small letter) · Ctrl+Shift+K switches typing to Hebrew</span></div>`
+      + rows.map((r, i) => `<div class="krow" style="padding-left:${i * 16}px">${r.map(([c, en]) => `<button data-c="${esc(c)}"><span class="kh">${esc(c)}</span><span class="ke">${esc(en)}</span></button>`).join("")}</div>`).join("")
       + `<div class="krow">${nikud.map(([c, n]) => `<button class="nk" data-c="${c}" title="${n}">ב${c}</button>`).join("")}</div>`
       + `<div class="krow">${marks.map(c => `<button data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
       + `<div class="krow"><button class="wide" data-act="close">close</button><button class="wide" data-c=" ">space</button><button class="wide" data-act="bs">⌫ delete</button><button class="wide" data-act="enter">↵ new line</button></div>`;

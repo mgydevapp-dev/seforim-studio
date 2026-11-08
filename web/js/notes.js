@@ -31,7 +31,7 @@ const Notes = {
       <div class="ed-body">
         <div class="ed-outline" id="edOutline"></div>
         <div class="img-pane hidden" id="edImgs" style="width:45%"><div class="row" style="justify-content:center"><button class="btn small" id="edAddImg">Add images / PDF</button><label class="small" style="color:#ddd"><input type="checkbox" id="edSync" checked> lock scroll</label></div><div id="edImgList"></div></div>
-        <div class="ed-page-wrap" id="edWrap"><div class="ed-page" id="edPage" contenteditable="true" spellcheck="false"><h1>כותרת</h1><p>התחל לכתוב כאן…</p></div></div>
+        <div class="ed-page-wrap" id="edWrap"><div class="ed-page" id="edPage" contenteditable="true" spellcheck="false"><h1 data-ph="כותרת"><br></h1><p data-ph="התחל לכתוב כאן…"><br></p></div></div>
         <div class="ed-side"><b>Document</b>
           <label class="small muted">Title</label><input id="edTitle" style="width:100%">
           <label class="small muted">Folder</label><input id="edFolder" style="width:100%">
