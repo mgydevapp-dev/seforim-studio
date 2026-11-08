@@ -33,7 +33,7 @@ OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 if not OLLAMA_URL.startswith("http"):
     OLLAMA_URL = "http://" + OLLAMA_URL
 VISION_HINTS = ("vl", "vision", "llava", "gemma3", "minicpm-v", "moondream", "llama4", "mistral-small3", "granite3.2-vision")
-PREFERRED = ["qwen3-vl:8b", "qwen3-vl:latest", "qwen3-vl:4b", "qwen3-vl:30b", "qwen3-vl:32b", "qwen3-vl:2b", "qwen2.5vl:7b", "gemma3:12b"]
+PREFERRED = ["qwen3-vl:8b-instruct", "qwen3-vl:4b-instruct", "qwen3-vl:8b", "qwen3-vl:latest", "qwen3-vl:4b", "qwen3-vl:30b", "qwen3-vl:32b", "qwen3-vl:2b", "qwen2.5vl:7b", "gemma3:12b"]
 
 PROMPT = """You are a careful transcriber of handwritten Hebrew.
 Transcribe ALL the Hebrew handwriting in this image exactly as written, line by line, top to bottom.
@@ -177,15 +177,31 @@ class OllamaEngine:
                 break
             if progress:
                 progress(i, len(parts), f"AI reading part {i + 1}/{len(parts)}")
-            body = {"model": model, "stream": False, "keep_alive": "10m",
+            body = {"model": model, "stream": False, "keep_alive": "10m", "think": False,  # no hidden "thinking": just read
                     "options": {"temperature": 0, "top_p": 0.9, "num_ctx": 8192, "num_predict": 2048},
                     "messages": [{"role": "user", "content": PROMPT + ("" if len(parts) == 1 else
                                   f"\n(This is part {i + 1} of {len(parts)} of a page; transcribe only what is visible.)"),
                                   "images": [_to_png_b64(part)]}]}
             req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                out = json.loads(r.read())
-            texts.append(clean_transcription(out.get("message", {}).get("content", "")))
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    out = json.loads(r.read())
+            except urllib.error.HTTPError as e:  # an older Ollama that does not know "think"
+                if e.code != 400:
+                    raise
+                body.pop("think", None)
+                body["messages"][0]["content"] = "/no_think\n" + body["messages"][0]["content"]
+                req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                    out = json.loads(r.read())
+            msg = out.get("message", {}) or {}
+            content = msg.get("content", "") or ""
+            # a "thinking" model may put its answer after </think> or only in the thinking part
+            if "</think>" in content:
+                content = content.split("</think>", 1)[1]
+            if not content.strip() and msg.get("thinking"):
+                print("AI gave no answer, only thinking:", len(msg["thinking"]), "chars", flush=True)
+            texts.append(clean_transcription(content))
         return merge_strips(texts)
 
 

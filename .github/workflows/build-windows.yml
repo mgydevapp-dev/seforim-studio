@@ -307,7 +307,7 @@ jobs:
           export OLLAMA_MODELS=$PWD/pack/ai/models
           (ollama serve > serve.log 2>&1 &)
           sleep 5
-          ollama pull qwen3-vl:4b
+          ollama pull qwen3-vl:4b-instruct || ollama pull qwen3-vl:4b
           ollama list
           du -sh pack/ai/models
           pkill ollama || true
