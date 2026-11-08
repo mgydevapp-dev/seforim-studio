@@ -243,7 +243,7 @@ with sync_playwright() as p:
             pg.click("#scAdd")
         fc.value.set_files([os.path.join(HERE, "data", "handwriting_sample.jpg"), os.path.join(HERE, "data", "typed_hebrew.pdf")])
         pg.wait_for_timeout(1500)
-        pg.select_option("#scEngine", "auto")
+        pg.click("#scKind button[data-k=\"auto\"]")
         pg.click("#scStart")
         for _ in range(180):
             pg.wait_for_timeout(1000)

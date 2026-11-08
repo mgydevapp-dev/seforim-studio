@@ -73,7 +73,7 @@ jobs:
         run: |
           New-Item -ItemType Directory ci-results -Force | Out-Null
           $dir = Join-Path $env:RUNNER_TEMP "PF\Seforim Studio"
-          Start-Process "SeforimStudio-Setup.exe" -ArgumentList "--silent","--allusers","--dir","$dir","--no-launch","--no-fonts" -Wait
+          Start-Process "SeforimStudio-Setup.exe" -ArgumentList "--silent","--allusers","--dir","`"$dir`"","--no-launch","--no-fonts" -Wait
           Write-Host "install.json: $(Get-Content "$dir\install.json" -Raw)"
           Write-Host "shared folder files: $((Get-ChildItem "$env:ProgramData\SeforimStudio" -Recurse -File | Measure-Object).Count)"
           Write-Host "public desktop shortcut: $(Test-Path "$env:PUBLIC\Desktop\Seforim Studio.lnk")"
