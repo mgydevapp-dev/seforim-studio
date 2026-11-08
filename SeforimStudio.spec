@@ -4,9 +4,10 @@ block_cipher = None
 a = Analysis(
     ["SeforimStudio.py"],
     pathex=["."],
-    datas=[("web", "web"), ("data/seforim_catalog.db", "data")],
+    datas=[("web", "web"), ("plugins", "plugins"), ("data/seforim_catalog.db", "data")],
     hiddenimports=["core.server", "core.library", "core.catalog", "core.tools", "core.formats", "core.share", "core.fonts",
-                   "core.hcalendar", "core.he_names", "core.userdata", "core.data_tables", "core.order",
+                   "core.hcalendar", "core.he_names", "core.userdata", "core.data_tables", "core.order", "core.plugins",
+                   "core.installer", "core.winproc", "ast", "difflib", "statistics", "random", "csv",
                    "scanner.cleanup", "scanner.engines", "pyluach", "pyluach.parshios", "docx", "pypdfium2"],
     excludes=["tkinter", "kraken", "torch", "matplotlib", "IPython", "pytest"],
     cipher=block_cipher,

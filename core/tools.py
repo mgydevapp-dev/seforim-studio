@@ -124,6 +124,8 @@ def numbering_list(a, ctx=None): return "\n".join(H.int_to_hebrew(i) for i in ra
       [{"name": "daf", "label": "Daf", "type": N}, {"name": "amud", "label": "Amud (1 or 2)", "type": N}])
 def daf_label(a, ctx=None):
     d, am = int(a.get("daf") or 2), int(a.get("amud") or 1)
+    if am not in (1, 2) or d < 1:
+        raise ToolInputError("Daf must be 2 or more and amud must be 1 or 2.")
     return f"{d}{'ab'[am - 1]} — דף {H.int_to_hebrew(d)} {'ע״א' if am == 1 else 'ע״ב'}"
 
 
@@ -688,10 +690,58 @@ def year_convert(a, ctx=None):
     return f"Hebrew {n} = {n - 3761}/{n - 3760} CE" if n > 3000 else f"{n} CE = Hebrew {n + 3760}/{n + 3761} ({H.int_to_hebrew(n + 3760)}/{H.int_to_hebrew(n + 3761)})"
 
 
+class ToolInputError(ValueError):
+    """A plain-English message for the user about what they typed."""
+
+
+def _clean_args(t, args):
+    """Accept what people really type: Hebrew-letter numbers (תשפ״ז, קכ), short Hebrew years (787 → 5787),
+    commas in numbers, and dates as 7/11/2026 or 11.7.2026."""
+    args = dict(args or {})
+    kinds = {i["name"]: i.get("type") for i in t["inputs"]}
+    for k, v in list(args.items()):
+        kind = kinds.get(k)
+        if not isinstance(v, str):
+            continue
+        v = v.strip()
+        if kind == N and v:
+            if re.search(r"[\u05d0-\u05ea]", v):
+                n = H.g_standard(re.sub(r"[^\u05d0-\u05ea]", "", v))
+                if k == "year" and n < 1000:
+                    n += 5000
+                v = str(n)
+            v = v.replace(",", "")
+            try:
+                float(v)
+            except ValueError:
+                raise ToolInputError(f"“{args[k]}” is not a number - please type a number (or Hebrew letters like תשפ״ז).")
+            if k == "year" and v.isdigit() and int(v) < 1000:
+                v = str(int(v) + 5000)
+        elif kind == D and v:
+            m = re.fullmatch(r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})", v)
+            if m:
+                mo, da = int(m.group(1)), int(m.group(2))
+                if "." in v:
+                    da, mo = mo, da  # 7.11.2026 = 7 November (European order)
+                v = f"{m.group(3)}-{mo:02d}-{da:02d}"
+            try:
+                dt.date.fromisoformat(v)
+            except ValueError:
+                raise ToolInputError(f"“{args[k]}” is not a date - please pick a date (for example 2026-11-07).")
+        args[k] = v
+    return args
+
+
 def run_tool(tid, args, ctx=None):
     for t in TOOLS:
         if t["id"] == tid:
-            return t["fn"](args or {}, ctx)
+            args = _clean_args(t, args)
+            try:
+                return t["fn"](args, ctx)
+            except ToolInputError:
+                raise
+            except (ValueError, IndexError, OverflowError) as e:
+                raise ToolInputError(f"That input doesn't work for this tool ({e}). Please check the numbers or date you typed.")
     raise KeyError(tid)
 
 

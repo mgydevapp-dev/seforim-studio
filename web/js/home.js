@@ -44,6 +44,12 @@ const Home = {
       ["tools", "🧰", "130+ Hebrew tools", "Calendar, ciphers, numbers, measures, text cleanup"], ["analysis", "📊", "Analysis", "Word clouds, co-occurrence, timelines, networks"],
       ["share", "📡", "Share", "Send to another computer over Wi-Fi or Bluetooth — no internet"], ["calendar", "📅", "Calendar", "Hebrew/English month view with holidays & daf"]
     ].map(([id, ic, t, dsc]) => `<div class="card feature-tile" data-go="${id}"><div class="ic">${ic}</div><b>${t}</b><div class="small muted">${dsc}</div></div>`).join("")}</div>`;
+    App.api("home_cards").then(cards => {
+      if (!cards.length) return;
+      el.querySelector(".home-hero").insertAdjacentHTML("afterend", `<div class="grid g3" style="margin-top:14px">${cards.map(c => `<div class="card" data-plugin="${esc(c.plugin)}"><div class="row"><b>${esc(c.icon || "")} ${esc(c.title)}</b><span class="spacer"></span>${c.open ? `<a href="#" class="small" data-pgo="${esc(c.open)}">open ›</a>` : ""}</div>${c.html}</div>`).join("")}</div>`);
+      $$("[data-pgo]", el).forEach(a => a.onclick = e => { e.preventDefault(); App.show(a.dataset.pgo); });
+      $$("[data-ref]", el).forEach(x => { if (!x.onclick) x.onclick = () => App.quickGo(x.dataset.ref); });
+    }).catch(() => {});
     $$("[data-go]", el).forEach(x => x.onclick = () => App.show(x.dataset.go));
     $("#hDaf", el).onclick = () => App.quickGo(d.daf.ref);
     $("#hPar", el).onclick = async () => { const ref = await App.api("reference_data"); const p = ref.parshiyos.find(x => d.parasha.startsWith(x[0]) || x[0].startsWith(d.parasha.split(/[ -]/)[0])); App.quickGo(p ? p[2] : "Genesis 1:1"); };

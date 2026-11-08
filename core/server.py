@@ -296,16 +296,37 @@ class App:
         self.user.set_setting("catalog_path", path)
 
     def _load_plugins(self):
-        """Plugins: any .py file in data/plugins can register extra tools with core.tools.tool(...)."""
-        self.plugins = []
-        for p in glob.glob(os.path.join(self.data, "plugins", "*.py")):
-            try:
-                spec = importlib.util.spec_from_file_location("plugin_" + os.path.basename(p)[:-3], p)
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                self.plugins.append(os.path.basename(p))
-            except Exception as e:  # noqa
-                self.plugins.append(f"{os.path.basename(p)} (error: {e})")
+        """Built-in plugins in <app>/plugins, the user's own in <data>/plugins (see core/plugins.py)."""
+        from .plugins import PluginManager
+        self.pm = PluginManager(self, [(os.path.join(self.base, "plugins"), True), (os.path.join(self.data, "plugins"), False)])
+        self.plugins = [f"{i['name']}{'' if i['enabled'] else ' (off)'}" for i in self.pm.plugins.values()]
+
+    # plugin storage (per profile)
+    def pget(self, pid, key, default=None):
+        v = self.user.get_setting(f"plugin:{pid}:{key}")
+        return default if v is None else v
+
+    def pset(self, pid, key, value):
+        self.user.set_setting(f"plugin:{pid}:{key}", value)
+
+    def api_plugins(self, a):
+        return self.pm.listing()
+
+    def api_plugin_toggle(self, a):
+        i = self.pm.toggle(a["id"], bool(a.get("on")))
+        return {k: v for k, v in i.items() if k not in ("module", "file", "root")}
+
+    def api_plugin_install(self, a):
+        return self.pm.install(self._upload_path(a["upload"]), os.path.join(self.data, "plugins"))
+
+    def api_plugin_remove(self, a):
+        return {"ok": self.pm.remove(a["id"])}
+
+    def api_plugin_call(self, a):
+        return self.pm.call(a["id"], a["fn"], a.get("args"))
+
+    def api_home_cards(self, a):
+        return self.pm.home_cards()
 
     # ------------------------------------------------------------------ helpers
     def export_path(self, name):
@@ -1112,6 +1133,8 @@ def make_handler(app):
                 if qs.get("t", [""])[0] != app.token and not u.path.startswith("/files/fonts/"):
                     return self._send(403, {"error": "token"})
                 return self._serve_file(app.data, u.path[7:], download=qs.get("dl", ["0"])[0] == "1")
+            if u.path == "/plugins.js":
+                return self._send(200, app.pm.all_js(), "text/javascript; charset=utf-8")
             if u.path == "/favicon.ico":
                 return self._serve_file(app.web, "icon.svg")
             if u.path.startswith("/web/"):
@@ -1144,6 +1167,8 @@ def make_handler(app):
                 try:
                     args = json.loads(body or b"{}")
                     return self._send(200, fn(args))
+                except TL.ToolInputError as e:
+                    return self._send(400, {"error": str(e)})
                 except Exception as e:  # noqa
                     traceback.print_exc()
                     return self._send(500, {"error": f"{type(e).__name__}: {e}"})

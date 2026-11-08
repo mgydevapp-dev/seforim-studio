@@ -82,7 +82,8 @@ const App = {
   },
   buildRail() {
     const r = $("#rail"); r.innerHTML = "";
-    for (const id of this.order) {
+    const order = [...this.order.filter(i => i !== "plugins" && i !== "settings"), "plugins", "settings"].filter(i => this.pages[i]);
+    for (const id of order) {
       const p = this.pages[id];
       const b = h(`<button data-id="${id}" title="${esc(p.title)}"><span class="ic">${p.icon}</span><span>${esc(this.t(p.title))}</span></button>`);
       b.onclick = () => this.show(id); r.appendChild(b);

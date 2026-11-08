@@ -247,7 +247,7 @@ const Library = {
       <div class="badges">${nl ? `<span class="badge" data-act="comm" title="${nl} connections">🔗${nl}</span>` : ""}${a.bookmarked ? `<span class="badge">🔖</span>` : ""}</div>
       <div class="tools"><button data-act="note" title="Note">📝</button><button data-act="hl" title="Highlight">🖍</button><button data-act="bm" title="Bookmark">🔖</button>
         <button data-act="tag" title="Tag">🏷</button><button data-act="link" title="Link to another source">🔗</button><button data-act="sheet" title="Add to source sheet">📄</button>
-        <button data-act="clip" title="Clipboard catcher">📋</button><button data-act="copy" title="Copy with citation">⧉</button><button data-act="comm" title="Commentaries">💬</button></div>
+        <button data-act="clip" title="Clipboard catcher">📋</button><button data-act="copy" title="Copy with citation">⧉</button><button data-act="chz" title="Add to Chazara review cards">🔁</button><button data-act="comm" title="Commentaries">💬</button></div>
       ${m === "en" ? en : he + en}
       ${a.tags.length ? `<div style="grid-column:1/-1">${a.tags.map(x => `<span class="tag">#${esc(x)}</span>`).join("")}</div>` : ""}
       ${a.notes.map(n => `<div class="note" data-note="${n.id}" style="background:${n.color || ""}">📝 ${esc(n.text)} ${n.tags ? `<span class="tag">${esc(n.tags)}</span>` : ""}</div>`).join("")}
@@ -279,6 +279,8 @@ const Library = {
       if (!act) { if (!String(window.getSelection())) this.select(p.id); return; }
       ({ note: () => this.editNote(p), hl: () => this.highlight(p), bm: () => this.bookmark(p), tag: () => this.tagPassage(p), link: () => this.userLink(p),
         sheet: () => Sheets.addSource(p), clip: () => App.addClip((this.nk(p.he) || "") + (p.en ? "\n" + p.en : ""), p.ref),
+        chz: async () => { if (!App.pages.chazara) return App.toast("Turn on the Chazara plugin (Plugins screen)", true);
+          const r = await App.api("plugin_call", { id: "chazara", fn: "add", args: { ref: p.ref } }); App.toast(r.added ? "Added to Chazara — review it on the Chazara screen" : "Already in Chazara"); },
         copy: () => App.copy(`${p.he || ""}\n${p.en || ""}\n— ${p.ref}\n${App.sefariaLink(p.ref)}`.replace(/\n\n/g, "\n"), `<p dir="rtl">${esc(p.he)}</p><p>${esc(p.en)}</p><p style="color:#8a6d3b">— ${esc(p.ref)}</p>`),
         comm: () => { this.view.comm = true; $("#rComm").checked = true; this.layoutPanes(); this.select(p.id, true); } })[act]?.();
     };
