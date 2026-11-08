@@ -3,7 +3,7 @@ const Home = {
   async load(el) {
     let d;
     try { d = App.state.dash = await App.api("dashboard"); } catch (e) { return; }
-    const st = App.state.status.library;
+    const st = (App.state.status && App.state.status.library) || { works: 0, passages: 0 };
     const z = d.zmanim;
     const zKeys = ["Alos HaShachar (16.1°)", "Netz / Sunrise", "Sof Zman Shema (MGA)", "Sof Zman Shema (GRA)", "Sof Zman Tefillah (GRA)", "Chatzos", "Mincha Gedola", "Plag HaMincha", "Candle lighting", "Shkia / Sunset", "Tzeis HaKochavim (8.5°)"];
     el.innerHTML = `

@@ -5,6 +5,11 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
 const isHeb = s => /[א-ת]/.test(s || "");
 
+// physical key (works whatever Windows keyboard language is active) -> Hebrew letter, standard Israeli layout
+const CODE_TO_HE = { KeyQ: "/", KeyW: "'", KeyE: "ק", KeyR: "ר", KeyT: "א", KeyY: "ט", KeyU: "ו", KeyI: "ן", KeyO: "ם", KeyP: "פ",
+  KeyA: "ש", KeyS: "ד", KeyD: "ג", KeyF: "כ", KeyG: "ע", KeyH: "י", KeyJ: "ח", KeyK: "ל", KeyL: "ך", Semicolon: "ף", Quote: ",",
+  KeyZ: "ז", KeyX: "ס", KeyC: "ב", KeyV: "ה", KeyB: "נ", KeyN: "מ", KeyM: "צ", Comma: "ת", Period: "ץ", Slash: ".", Backquote: ";" };
+const FINAL_OF = { "כ": "ך", "מ": "ם", "נ": "ן", "פ": "ף", "צ": "ץ" };
 const EN_TO_HE = { q: "/", w: "'", e: "ק", r: "ר", t: "א", y: "ט", u: "ו", i: "ן", o: "ם", p: "פ", a: "ש", s: "ד", d: "ג", f: "כ", g: "ע", h: "י", j: "ח", k: "ל", l: "ך", ";": "ף", "'": ",", z: "ז", x: "ס", c: "ב", v: "ה", b: "נ", n: "מ", m: "צ", ",": "ת", ".": "ץ", "/": ".", "`": ";" };
 
 const I18N = {
@@ -94,7 +99,8 @@ const App = {
   setHeb(on) {
     this.state.heb = on; $("#kbToggle").classList.toggle("on", on);
     $("#kbToggle").textContent = on ? "⌨ עברית" : "⌨ EN → עב";
-    this.status(on ? "Keyboard: Hebrew (English keys type Hebrew letters)" : "Keyboard: normal");
+    this.status(on ? "Keyboard: Hebrew (English keys type Hebrew letters · Shift = English capital · Ctrl+Shift+K or Alt+Shift to switch)" : "Keyboard: normal");
+    try { localStorage.setItem("heb_kb", on ? "1" : "0"); } catch (e) { }
   },
   isTypingTarget(el) {
     if (!el) return false;
@@ -103,17 +109,37 @@ const App = {
   },
   insertText(text, target) {
     const el = target || document.activeElement;
+    if (el && el.focus && document.activeElement !== el) el.focus();
+    // execCommand keeps Ctrl+Z (undo) working; setRangeText is the fallback
+    if (document.execCommand("insertText", false, text)) return;
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {
-      const s = el.selectionStart, e = el.selectionEnd; el.setRangeText(text, s, e, "end"); el.dispatchEvent(new Event("input", { bubbles: true }));
-    } else document.execCommand("insertText", false, text);
+      const s = el.selectionStart ?? el.value.length, e = el.selectionEnd ?? s; el.setRangeText(text, s, e, "end"); el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  },
+  /* the letter just before the caret (for automatic final letters) */
+  prevChar(el) {
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") { const i = el.selectionStart; return i > 0 && i === el.selectionEnd ? el.value[i - 1] + (el.value[i - 2] || "") : ""; }
+    const sel = getSelection(); if (!sel.rangeCount || !sel.isCollapsed) return "";
+    const n = sel.anchorNode, o = sel.anchorOffset; return n && n.nodeType === 3 && o > 0 ? n.data[o - 1] + (n.data[o - 2] || "") : "";
+  },
+  fixFinal(el) {
+    if (this.state.settings && this.state.settings.auto_finals === "0") return;
+    const pc = this.prevChar(el), last = pc[0], before = pc[1];
+    if (last && FINAL_OF[last] && before && /[\u05d0-\u05ea]/.test(before)) { document.execCommand("delete"); this.insertText(FINAL_OF[last], el); }
   },
   initKeyboard() {
+    try { if (localStorage.getItem("heb_kb") === "1") setTimeout(() => this.setHeb(true), 0); } catch (e) { }
     document.addEventListener("keydown", e => {
-      if (e.ctrlKey && e.shiftKey && (e.key === "K" || e.key === "k")) { e.preventDefault(); this.setHeb(!this.state.heb); return; }
+      if (e.ctrlKey && e.shiftKey && (e.key === "K" || e.key === "k" || e.code === "KeyK")) { e.preventDefault(); this.setHeb(!this.state.heb); return; }
+      if (e.altKey && e.shiftKey && !e.ctrlKey) { e.preventDefault(); this.setHeb(!this.state.heb); return; }  // Alt+Shift like Windows
       if (e.key === "Escape" && document.body.classList.contains("focus")) { document.body.classList.remove("focus"); return; }
-      if (!this.state.heb || e.ctrlKey || e.altKey || e.metaKey) return;
       const t = e.target; if (!this.isTypingTarget(t) || t.classList.contains("no-heb")) return;
-      const ch = EN_TO_HE[e.key.toLowerCase()];
+      const hebTyping = this.state.heb || /[\u05d0-\u05ea]/.test(e.key);
+      // final letters: כ→ך מ→ם נ→ן פ→ף צ→ץ when a word ends
+      const mapped = this.state.heb && !e.shiftKey ? CODE_TO_HE[e.code] : null;  // e.g. "," types ת in Hebrew mode - not the end of a word
+      if (hebTyping && !e.ctrlKey && !e.altKey && !(mapped && /[\u05d0-\u05ea]/.test(mapped)) && (e.key === " " || e.key === "Enter" || /^[.,;:!?)\]"'״׳-]$/.test(e.key))) this.fixFinal(t);
+      if (!this.state.heb || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;  // Shift+key still types English capitals
+      const ch = CODE_TO_HE[e.code] || EN_TO_HE[(e.key || "").toLowerCase()];
       if (ch && e.key.length === 1) { e.preventDefault(); this.insertText(ch, t); }
     }, true);
     document.addEventListener("focusin", e => { if (this.isTypingTarget(e.target) && !e.target.closest("#osk")) this.lastFocus = e.target; });
@@ -122,17 +148,24 @@ const App = {
     $$(".top-actions button").forEach(b => b.addEventListener("mousedown", e => e.preventDefault()));
   },
   initOSK() {
-    const rows = [["ק", "ר", "א", "ט", "ו", "ן", "ם", "פ"], ["ש", "ד", "ג", "כ", "ע", "י", "ח", "ל", "ך", "ף"], ["ז", "ס", "ב", "ה", "נ", "מ", "צ", "ת", "ץ"],
-      ["ָ", "ַ", "ֵ", "ֶ", "ְ", "ִ", "ֹ", "ֻ", "ּ", "ׁ", "ׂ", "ֲ", "ֱ", "ֳ"], ["״", "׳", "־", "׃", "׀", "₪", "{פ}", "{ס}"]];
+    const rows = [["/", "'", "ק", "ר", "א", "ט", "ו", "ן", "ם", "פ"], ["ש", "ד", "ג", "כ", "ע", "י", "ח", "ל", "ך", "ף"], ["ז", "ס", "ב", "ה", "נ", "מ", "צ", "ת", "ץ", "."]];
+    const nikud = [["ְ", "Sheva"], ["ֱ", "Chataf segol"], ["ֲ", "Chataf patach"], ["ֳ", "Chataf kamatz"], ["ִ", "Chirik"], ["ֵ", "Tzeirei"], ["ֶ", "Segol"],
+      ["ַ", "Patach"], ["ָ", "Kamatz"], ["ֹ", "Cholam"], ["ֻ", "Kubutz"], ["ּ", "Dagesh"], ["ׁ", "Shin dot"], ["ׂ", "Sin dot"]];
+    const marks = ["״", "׳", "־", "׃", "׀", "₪", "{פ}", "{ס}", "(", ")", "?", "!"];
     const k = $("#osk");
-    k.innerHTML = rows.map((r, i) => `<div class="krow">${r.map(c => `<button class="${i === 3 ? "nk" : ""}" data-c="${esc(c)}">${i === 3 ? "ב" + c : esc(c)}</button>`).join("")}</div>`).join("")
-      + `<div class="krow"><button class="wide" data-c=" ">space</button><button class="wide" data-act="bs">⌫ delete</button><button class="wide" data-act="close">close</button></div>`;
+    k.innerHTML = rows.map(r => `<div class="krow">${r.map(c => `<button data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`).join("")
+      + `<div class="krow">${nikud.map(([c, n]) => `<button class="nk" data-c="${c}" title="${n}">ב${c}</button>`).join("")}</div>`
+      + `<div class="krow">${marks.map(c => `<button data-c="${esc(c)}">${esc(c)}</button>`).join("")}</div>`
+      + `<div class="krow"><button class="wide" data-act="close">close</button><button class="wide" data-c=" ">space</button><button class="wide" data-act="bs">⌫ delete</button><button class="wide" data-act="enter">↵ new line</button></div>`;
     k.addEventListener("mousedown", e => e.preventDefault());
     k.onclick = e => {
       const b = e.target.closest("button"); if (!b) return;
       if (b.dataset.act === "close") return k.classList.add("hidden");
-      const tgt = this.lastFocus; if (tgt) tgt.focus();
+      const tgt = this.lastFocus; if (!tgt) return this.toast("Click in a text box first, then use the keyboard", true);
+      tgt.focus();
       if (b.dataset.act === "bs") return document.execCommand("delete");
+      if (b.dataset.act === "enter") return this.insertText(tgt.tagName === "INPUT" ? "" : "\n", tgt);
+      if (b.dataset.c === " ") this.fixFinal(tgt);
       this.insertText(b.dataset.c, tgt);
     };
     $("#oskBtn").onclick = () => k.classList.toggle("hidden");

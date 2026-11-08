@@ -184,6 +184,51 @@ jobs:
           git add -A; git commit -q -m "Big library sweep ${{ github.sha }}"
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" ci-results-big
 
+  cursive:
+    # trains the offline reader for Hebrew cursive handwriting (כתב) - put "[cursive]" in the commit message
+    if: contains(github.event.head_commit.message, '[cursive]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools, fonts, text
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr culmus fonts-noto-core > /dev/null || sudo apt-get install -y -qq tesseract-ocr > /dev/null
+          pip install -q pillow numpy
+          mkdir -p work/fonts work/tessdata && cd work
+          curl -fsSL -o tessdata/heb.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/heb.traineddata
+          curl -fsSL -o heb.txt https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/main/heb/heb.training_text
+          git clone -q --depth 1 https://github.com/AlefAlefAlef/gveret-levin.git f1 || true
+          git clone -q --depth 1 https://github.com/aharonium/fonts.git f2 || true
+          git clone -q --depth 1 https://github.com/tesseract-ocr/tesstrain.git
+          find f1 f2 /usr/share/fonts -type f -iregex '.*\(ktav\|yad\|gveret\|levin\|dana\|anka\|refoyl\|nachlaot\|shmulik\|ellinia.*it\|dorian.*it\).*\.\(ttf\|otf\)' | sort -u > fontlist.txt
+          cat fontlist.txt
+      - name: Make 24,000 handwriting-style training lines
+        run: |
+          cd work
+          python ../tools/make_script_gt.py --fonts $(head -40 fontlist.txt) --corpus heb.txt --out tesstrain/data/heb_script-ground-truth --lines 24000
+          python ../tools/make_script_gt.py --fonts $(head -40 fontlist.txt) --corpus heb.txt --out heldout --lines 300 --seed 99
+      - name: Train (fine-tune the Hebrew model on cursive)
+        run: |
+          cd work/tesstrain
+          make -j4 lists MODEL_NAME=heb_script START_MODEL=heb TESSDATA=$PWD/../tessdata LANG_TYPE=RTL PSM=7 > lists.log 2>&1 || (tail -40 lists.log; exit 1)
+          make training MODEL_NAME=heb_script START_MODEL=heb TESSDATA=$PWD/../tessdata LANG_TYPE=RTL PSM=7 MAX_ITERATIONS=20000 2>&1 | grep -E "At iteration|Finished|error|Error" | awk 'NR%20==1 || /Finished|rror/'
+          ls -la data/ | head
+          lstmtraining --stop_training --convert_to_int --continue_from data/heb_script/checkpoints/heb_script_checkpoint \
+            --traineddata data/heb_script/heb_script.traineddata --model_output ../tessdata/heb_script.traineddata || cp data/heb_script.traineddata ../tessdata/
+          ls -la ../tessdata
+      - name: Test
+        run: |
+          cd work
+          python ../tools/eval_script.py tessdata heldout report.md ../tests/data/cursive_alphabet.png ../tests/data/handwriting_sample.jpg ../tests/data/messy_handwriting.png
+      - name: Publish the model (branch models-cursive)
+        if: always()
+        run: |
+          mkdir -p out; cp work/tessdata/heb_script.traineddata out/ 2>/dev/null; cp work/report.md work/fontlist.txt out/ 2>/dev/null; cd out
+          git init -q -b models-cursive; git config user.name build-bot; git config user.email build-bot@users.noreply.github.com
+          git add -A; git commit -q -m "Cursive model ${{ github.sha }}"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" models-cursive
+
   ai:
     if: (github.event_name == 'workflow_dispatch' && inputs.build_ai) || contains(github.event.head_commit.message, '[ai]')
     runs-on: ubuntu-latest

@@ -80,6 +80,8 @@ try {
     if (-not (Test-Path "$tsDir\tesseract.exe")) { throw "not installed" }
     New-Item -ItemType Directory -Force -Path "$tsDir\tessdata" | Out-Null
     Invoke-WebRequest $HebUrl -OutFile "$tsDir\tessdata\heb.traineddata"
+    # the cursive handwriting (ktav) reader trained for Seforim Studio
+    Get-ChildItem "scanner\models\*.traineddata" -ErrorAction SilentlyContinue | Copy-Item -Destination "$tsDir\tessdata\"
     $langs = & "$tsDir\tesseract.exe" --list-langs 2>&1
     Write-Host "     Tesseract + Hebrew added. Languages: $($langs -join ' ')" -ForegroundColor Green
 } catch {

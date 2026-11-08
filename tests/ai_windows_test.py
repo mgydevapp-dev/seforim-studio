@@ -68,7 +68,20 @@ say(f"Engine A ready: {eng['ollama']['ok']} - {eng['ollama']['info']}")
 
 ok_all = eng["ollama"]["ok"]
 if ok_all:
-    for sample in ("handwriting_sample.jpg",):
+    def score(pred, truth):
+        import re as _re
+        def lev(a, b):
+            prev = list(range(len(b) + 1))
+            for i, x in enumerate(a, 1):
+                cur = [i]
+                for j, y in enumerate(b, 1):
+                    cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+                prev = cur
+            return prev[-1]
+        norm = lambda t: _re.sub(r"\s+", " ", _re.sub(r"[^\u05d0-\u05ea ]", " ", t or "")).strip()
+        p, t = norm(pred), norm(truth)
+        return lev(p, t) / max(1, len(t)), 1 - lev(p.split(), t.split()) / max(1, len(t.split()))
+    for sample in ("handwriting_sample.jpg", "cursive_alphabet.png", "messy_handwriting.png"):
         up = json.loads(urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{PORT}/upload",
                        data=open(os.path.join(HERE, "data", sample), "rb").read(), headers={"X-Token": tok, "X-Filename": sample})).read())
         job = api("scan_start", uploads=[up["upload"]], opts={})["job"]
@@ -80,12 +93,15 @@ if ok_all:
             time.sleep(3)
         text = r2["result"]["pages"][0] if r2.get("result") else str(r2.get("error"))
         secs = int(time.time() - t1)
-        truth = open(os.path.join(HERE, "data", "handwriting_sample.txt"), encoding="utf-8").read()
-        sys.path.insert(0, HERE)
-        from compare_engines import score
+        tf = os.path.join(HERE, "data", os.path.splitext(sample)[0] + ".txt")
+        if not os.path.exists(tf):  # no answer key: just show what it read
+            say(f"\nAI read {sample} in {secs} s:\n{text}")
+            continue
+        truth = open(tf, encoding="utf-8").read()
         cer, wacc = score(text, truth)
         say(f"\nAI read {sample} in {secs} s (CPU only, no graphics card):\n{text}\n\nCharacters wrong: {cer:.1%}  Words correct: {wacc:.1%}")
-        ok_all = ok_all and cer < 0.35
+        if sample == "handwriting_sample.jpg":
+            ok_all = ok_all and cer < 0.35
 proc.terminate()
 with open(os.path.join(OUT, "ai_report.md"), "w", encoding="utf-8") as f:
     f.write("# AI handwriting reader test (Windows)\n\n```\n" + "\n".join(report) + "\n```\n")

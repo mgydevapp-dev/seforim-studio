@@ -216,9 +216,9 @@ class App:
                 self.install.update(progress=96, message="Keeping the seforim you added yourself…")
                 new_lib = Library(tmp)
                 kept = installer.copy_user_works(path, new_lib)
-                new_lib.db.close()
+                new_lib.close()
                 with self.lib.lock:
-                    self.lib.db.close()
+                    self.lib.close()
                     for f in (path + "-wal", path + "-shm"):
                         if os.path.exists(f):
                             os.remove(f)
@@ -834,9 +834,11 @@ class App:
         from .order import he_name
         if not self.catalog:
             return {}
-        ws = self.catalog.q("SELECT title FROM works")
-        return {"works": len(ws), "with_hebrew": sum(1 for w in ws if he_name(w["title"])),
-                "official": self.lib.q1("SELECT COUNT(*) n FROM he_titles")["n"]}
+        off = self.lib.q1("SELECT COUNT(*) n FROM he_titles")["n"]
+        if getattr(self, "_hecov", (None,))[0] != off:
+            ws = self.catalog.q("SELECT title FROM works")
+            self._hecov = (off, {"works": len(ws), "with_hebrew": sum(1 for w in ws if he_name(w["title"])), "official": off})
+        return self._hecov[1]
 
     def api_dl_status(self, a):
         return self.dl.state if self.catalog else {"running": False}
@@ -940,7 +942,21 @@ class App:
                     out.append(f"[page {i + 1}: {e}]")
             if progress:
                 progress(len(pages), len(pages), "done")
-            return {"engine": eng.name, "pages": out}
+            if not engines.KNOWN_WORDS:
+                try:
+                    engines.KNOWN_WORDS.update(r["word"] for r in self.lib.q("SELECT word FROM words ORDER BY freq DESC LIMIT 300000"))
+                except Exception:
+                    pass
+            quality = [round(engines.text_quality(t), 2) for t in out]
+            warn = ""
+            if eng.key == "tesseract" and quality and min(quality) < 0.45:
+                ai_ok = any(e["key"] == "ollama" and e["ok"] for e in engines.status(**self._engine_kw()))
+                warn = ("This looks like handwriting (script / כתב). The print reader (C – Tesseract) only reads printed or very neat "
+                        "block letters, so it comes out as random symbols. " +
+                        ("Choose engine A (AI) to read handwriting." if ai_ok else
+                         "To read handwriting, install the AI reader: download the 3 SeforimAI.tar.part… files into Downloads, "
+                         "then press 'Install AI reader' above (or restart the app)."))
+            return {"engine": eng.name, "pages": out, "quality": quality, "warning": warn}
         return {"job": self.jobs.start(run), "engine": eng.name}
 
     def api_scan_train(self, a):

@@ -80,15 +80,17 @@ const Roshei = {
     const letters = $("#rtIn").value.trim(); if (!letters) return;
     if (!more) this.off = 0;
     const scope = $("#rtCat").value ? { categories: [$("#rtCat").value] } : {};
+    $("#rtRes").innerHTML = more ? $("#rtRes").innerHTML : "<p class='muted'>Searching the whole library…</p>";
     const r = await App.api("roshei", { letters, mode: $("input[name=rtm]:checked").value, scope, offset: this.off, limit: 60 });
+    if (!$("#rtRes")) return;  // the user went to another screen meanwhile
     if (!more) {
       const exp = await App.api("tool_run", { id: "expand_abbrev", args: { text: letters } });
-      $("#rtExp").innerHTML = `<div class="card"><b>${r.total.toLocaleString()}</b> places in the library. ${typeof exp.result === "string" && !exp.result.startsWith("Not in") ? `<span class="he" style="font-size:18px">Dictionary: <b>${esc(exp.result)}</b></span>` : ""}</div>`;
+      $("#rtExp").innerHTML = `<div class="card"><b>${r.total.toLocaleString()}${r.approx ? "+" : ""}</b> places in the library. ${typeof exp.result === "string" && !exp.result.startsWith("Not in") ? `<span class="he" style="font-size:18px">Dictionary: <b>${esc(exp.result)}</b></span>` : ""}</div>`;
     }
     const html = r.results.map(x => `<div class="result"><a class="ref" href="#" data-open="${x.id}">${esc(x.ref)}</a> ${x.phrases.map(p => `<span class="pill he" style="font-size:15px">${esc(p)}</span>`).join(" ")}
       <div class="cols"><div class="he">${x.he_html}</div><div class="en">${x.en_html}</div></div></div>`).join("");
     if (more) $("#rtRes").insertAdjacentHTML("beforeend", html); else $("#rtRes").innerHTML = html || "<p class='muted'>Not found.</p>";
-    this.off += r.results.length; $("#rtMore").classList.toggle("hidden", this.off >= r.total);
+    this.off += r.results.length; $("#rtMore").classList.toggle("hidden", !r.approx && this.off >= r.total);
   },
   async els() {
     const works = await App.api("lib_works");

@@ -54,6 +54,7 @@ const Analysis = {
   async t_net(el) {
     el.innerHTML = `<p class="muted small">Which seforim reference each other most (from the cross-reference pack). Drag nodes to rearrange.</p><svg id="netSvg" width="100%" height="560" class="card"></svg>`;
     const edges = await App.api("network", { limit: 50 });
+    if (!$("#netSvg")) return;
     if (!edges.length) { el.innerHTML += "<p class='muted'>No cross-references imported yet (Settings → Library → include cross-references).</p>"; return; }
     const names = [...new Set(edges.flatMap(e => [e.a, e.b]))];
     const W = $("#netSvg").clientWidth || 900, H = 560;

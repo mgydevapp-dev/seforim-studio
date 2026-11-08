@@ -94,6 +94,8 @@ const Scanner = {
     this.textPages = r.pages;
     $("#scOut").value = r.pages.map((t, i) => (r.pages.length > 1 ? `——— page ${i + 1} ———\n` : "") + t).join("\n\n");
     $("#scStat").textContent = `Done — read ${r.pages.length} page(s) with ${r.engine}. Please check and correct the text.`;
+    const w = $("#scWarn") || (() => { const d = document.createElement("div"); d.id = "scWarn"; $("#scStat").after(d); return d; })();
+    w.innerHTML = r.warning ? `<div class="lib-health" style="margin:8px 0"><b>⚠ The text came out as symbols</b><div class="small">${esc(r.warning)}</div></div>` : "";
   },
   async train() {
     if (!this.pages.length) return App.toast("Scan a page first");

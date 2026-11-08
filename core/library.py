@@ -39,7 +39,9 @@ class Library:
         self.path = path
         os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.lock = threading.RLock()
-        self.db = sqlite3.connect(path, check_same_thread=False)
+        self._local = threading.local()
+        self._readers = []
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
@@ -106,7 +108,31 @@ class Library:
             self.contentless = False
         c.commit()
 
+    def _reader(self):
+        """Each server thread reads through its own connection, so a long search never blocks opening a sefer."""
+        c = getattr(self._local, "db", None)
+        if c is None:
+            c = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
+            c.row_factory = sqlite3.Row
+            c.execute("PRAGMA query_only=1")
+            c.execute("PRAGMA cache_size=-65536")
+            c.create_function("regexp", 2, lambda p, s: 1 if s and re.search(p, s) else 0, deterministic=True)
+            self._local.db = c
+            self._readers.append(c)
+        return c
+
+    def close(self):
+        for c in self._readers + [self.db]:
+            try:
+                c.close()
+            except Exception:
+                pass
+        self._readers.clear()
+
     def q(self, sql, args=()):
+        head = sql.lstrip()[:6].upper()
+        if head in ("SELECT", "WITH S") and not self.lock._is_owned():
+            return [dict(r) for r in self._reader().execute(sql, args).fetchall()]
         with self.lock:
             return [dict(r) for r in self.db.execute(sql, args).fetchall()]
 
@@ -313,8 +339,9 @@ class Library:
         r = self.q1("SELECT p.id, p.work_id, p.node, p.chapter, p.ref FROM passages p WHERE ref=? LIMIT 1", (ref,))
         if r:
             return r
-        r = self.q1("SELECT p.id, p.work_id, p.node, p.chapter, p.ref FROM passages p WHERE ref LIKE ? ORDER BY id LIMIT 1",
-                    (ref + ":%",))
+        # (a range instead of LIKE 'ref:%' - LIKE cannot use the index and scans all 3.5 million passages)
+        r = self.q1("SELECT p.id, p.work_id, p.node, p.chapter, p.ref FROM passages p WHERE ref>=? AND ref<? ORDER BY ref LIMIT 1",
+                    (ref + ":", ref + ";"))
         if r:
             return r
         # by Hebrew title / title only
@@ -675,44 +702,67 @@ class Library:
             r["en_html"] = _esc(r["en"])
         return {"total": total, "results": rows}
 
+    def _work_ids(self, scope):
+        """Works in library order (Tanach first …), limited to the scope."""
+        ssql, sargs = self._scope_sql(scope)
+        ssql = ssql.replace("p.work_id", "w.id")
+        return [r["id"] for r in self.q(f"SELECT w.id FROM works w WHERE w.n_passages>0 {ssql} ORDER BY w.sort_key", sargs)]
+
+    def _stream(self, cols, scope, where="", args=()):
+        """Go through the passages work by work (using the index), so we can stop as soon as we have enough
+        instead of loading 3.5 million passages into memory."""
+        ids = self._work_ids(scope)
+        db = self._reader()
+        titles = {r["id"]: r for r in self.q("SELECT id, title, he_title FROM works")}
+        for n, wid in enumerate(ids):
+            for r in db.execute(f"SELECT {cols} FROM passages p WHERE p.work_id=? {where} ORDER BY p.seq", (wid, *args)):
+                yield n, len(ids), titles.get(wid, {}), r
+
     def gematria_phrases(self, value, method, min_words=2, max_words=4, scope=None, limit=300, progress=None, cancel=None):
         """Scan for consecutive word sequences whose value equals `value` (verses or phrases)."""
         fn = H.GEMATRIA_METHODS[method]
-        ssql, sargs = self._scope_sql(scope)
-        with self.lock:
-            total = self.db.execute(f"SELECT COUNT(*) FROM passages p JOIN works w ON w.id=p.work_id WHERE 1=1 {ssql}", sargs).fetchone()[0]
-            rows = self.db.execute(f"SELECT p.id,p.ref,p.he,p.he_plain,w.title FROM passages p JOIN works w ON w.id=p.work_id "
-                                   f"WHERE 1=1 {ssql} ORDER BY w.sort_key, p.seq", sargs).fetchall()
         out = []
         cache = self._gem_cache.setdefault(method, {})
-        for n, r in enumerate(rows):
-            if cancel and cancel():
-                break
-            if progress and n % 2000 == 0:
-                progress(n, total)
+        if len(cache) > 400000:
+            cache.clear()
+        last = -1
+        for n, total, w, r in self._stream("p.id, p.ref, p.he_plain", scope):
+            if n != last:
+                last = n
+                if cancel and cancel():
+                    break
+                if progress:
+                    progress(n, total)
             ws = (r["he_plain"] or "").split()
             vals = []
-            for w in ws:
-                v = cache.get(w)
+            for x in ws:
+                v = cache.get(x)
                 if v is None:
-                    v = cache[w] = fn(w)
+                    v = cache[x] = fn(x)
                 vals.append(v)
-            whole = sum(vals)
-            if whole == value and len(ws) > max_words:
-                out.append({"id": r["id"], "ref": r["ref"], "phrase": "(entire passage)", "he_html": _esc(r["he"]), "title": r["title"]})
+            hits = []
+            if sum(vals) == value and len(ws) > max_words:
+                hits.append(None)
             for i in range(len(vals)):
-                s = 0
+                t = 0
                 for j in range(i, min(i + max_words, len(vals))):
-                    s += vals[j]
-                    if s > value and method != "Katan Mispari (digital root)":
+                    t += vals[j]
+                    if t > value and method != "Katan Mispari (digital root)":
                         break
-                    if s == value and j - i + 1 >= min_words:
-                        out.append({"id": r["id"], "ref": r["ref"], "phrase": " ".join(ws[i:j + 1]), "title": r["title"],
-                                    "he_html": self.highlight_he(r["he"], set(), idx_ranges=[(i, j)])})
+                    if t == value and j - i + 1 >= min_words:
+                        hits.append((i, j))
+            if hits:
+                he = self.q1("SELECT he FROM passages WHERE id=?", (r["id"],))["he"]
+                for h in hits:
+                    if h is None:
+                        out.append({"id": r["id"], "ref": r["ref"], "phrase": "(entire passage)", "he_html": _esc(he), "title": w.get("title")})
+                    else:
+                        out.append({"id": r["id"], "ref": r["ref"], "phrase": " ".join(ws[h[0]:h[1] + 1]), "title": w.get("title"),
+                                    "he_html": self.highlight_he(he, set(), idx_ranges=[h])})
             if len(out) >= limit:
                 break
         if progress:
-            progress(total, total)
+            progress(1, 1)
         return out[:limit]
 
     # ------------------------------------------------------------------ roshei / sofei teivos
@@ -722,11 +772,18 @@ class Library:
             return {"total": 0, "results": [], "expansions": []}
         col = "initials" if mode == "roshei" else "finals"
         ssql, sargs = self._scope_sql(scope)
-        rows = self.q(f"SELECT p.id,p.ref,p.he,p.en,p.{col} AS key,w.title,w.he_title,p.work_id FROM passages p JOIN works w ON w.id=p.work_id "
-                      f"WHERE instr(p.{col}, ?) > 0 {ssql} ORDER BY w.sort_key, p.seq LIMIT ? OFFSET ?",
-                      [target] + sargs + [limit, offset])
-        total = self.q1(f"SELECT COUNT(*) n FROM passages p JOIN works w ON w.id=p.work_id WHERE instr(p.{col}, ?) > 0 {ssql}",
-                        [target] + sargs)["n"]
+        rows, seen = [], 0
+        t0 = time.time()
+        more = False
+        for n, total, w, r in self._stream(f"p.id, p.ref, p.he, p.en, p.work_id, p.{col} AS key", scope, f"AND instr(p.{col}, ?) > 0", (target,)):
+            seen += 1
+            if seen <= offset:
+                continue
+            if len(rows) >= limit or time.time() - t0 > 20:
+                more = True
+                break
+            rows.append({**dict(r), "title": w.get("title"), "he_title": w.get("he_title")})
+        total = offset + len(rows) + (1 if more else 0)
         for r in rows:
             ranges, start = [], 0
             while True:
@@ -743,7 +800,7 @@ class Library:
         exp = []
         if target in ABBREV_CLEAN:
             exp.append(ABBREV_CLEAN[target])
-        return {"total": total, "results": rows, "expansions": exp}
+        return {"total": total, "results": rows, "expansions": exp, "approx": more}
 
     # ------------------------------------------------------------------ ELS (dilugim)
     def els(self, word, work_id, min_skip=2, max_skip=500, limit=100, cancel=None):
@@ -812,8 +869,10 @@ class Library:
             if l["other"] in seen:
                 continue
             seen.add(l["other"])
-            texts = self.q("SELECT p.id, p.ref, p.he, p.en, w.title, w.he_title FROM passages p JOIN works w ON w.id=p.work_id "
-                           "WHERE p.ref=? OR p.ref LIKE ? ORDER BY p.seq LIMIT 30", (l["other"], l["other"] + ":%"))
+            o = l["other"]
+            texts = self.q("SELECT * FROM (SELECT p.id, p.seq, p.ref, p.he, p.en, w.title, w.he_title FROM passages p JOIN works w ON w.id=p.work_id "
+                           "WHERE p.ref=? UNION ALL SELECT p.id, p.seq, p.ref, p.he, p.en, w.title, w.he_title FROM passages p "
+                           "JOIN works w ON w.id=p.work_id WHERE p.ref>=? AND p.ref<?) ORDER BY seq LIMIT 30", (o, o + ":", o + ";"))
             title = texts[0]["title"] if texts else re.sub(r"\s[\d:ab]+$", "", l["other"])
             groups[title].append({"ref": l["other"], "type": l["type"], "cat": l["cat"], "texts": texts})
         from .order import he_name
@@ -872,7 +931,10 @@ class Library:
         return c.most_common(top)
 
     def citation_network(self, limit=40):
-        """Which works link to which (counts), from the links table."""
+        """Which works link to which (counts), from the links table (worked out once, then remembered)."""
+        key = ("net", limit, self.q1("SELECT COALESCE(MAX(rowid),0) n FROM links")["n"])
+        if getattr(self, "_net", (None,))[0] == key:
+            return self._net[1]
         rows = self.q("SELECT ref1, ref2 FROM links LIMIT 400000")
         c = Counter()
         strip = lambda r: re.sub(r"\s[\d:ab]+$", "", r).split(",")[0]
@@ -880,7 +942,9 @@ class Library:
             a, b = strip(r["ref1"]), strip(r["ref2"])
             if a != b:
                 c[(a, b)] += 1
-        return [{"a": a, "b": b, "n": n} for (a, b), n in c.most_common(limit)]
+        res = [{"a": a, "b": b, "n": n} for (a, b), n in c.most_common(limit)]
+        self._net = (key, res)
+        return res
 
     def category_histogram(self, query, lang="auto", opts=None):
         res_lang = H.detect_lang(query) if lang == "auto" else lang
@@ -905,11 +969,18 @@ class Library:
                 for r in ref_list]
 
     def stats(self):
+        # fast counts (COUNT(*) over millions of rows takes seconds on a big library)
         return {"works": self.q1("SELECT COUNT(*) n FROM works")["n"],
-                "passages": self.q1("SELECT COUNT(*) n FROM passages")["n"],
-                "words": self.q1("SELECT COUNT(*) n FROM words")["n"],
-                "links": self.q1("SELECT COUNT(*) n FROM links")["n"],
+                "passages": self.q1("SELECT COALESCE(SUM(n_passages),0) n FROM works")["n"],
+                "words": self._words_count(),
+                "links": self.q1("SELECT COALESCE(MAX(rowid),0) n FROM links")["n"],
                 "size_mb": round(os.path.getsize(self.path) / 1e6, 1) if os.path.exists(self.path) else 0}
+
+    def _words_count(self):
+        n = self.q1("SELECT COALESCE(SUM(n_passages),0) n FROM works")["n"]
+        if getattr(self, "_wc", (None,))[0] != n:
+            self._wc = (n, self.q1("SELECT COUNT(*) n FROM words")["n"])
+        return self._wc[1]
 
     def compact(self):
         with self.lock:

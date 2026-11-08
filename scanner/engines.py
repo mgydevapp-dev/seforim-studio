@@ -37,6 +37,8 @@ PREFERRED = ["qwen3-vl:8b", "qwen3-vl:latest", "qwen3-vl:4b", "qwen3-vl:30b", "q
 
 PROMPT = """You are a careful transcriber of handwritten Hebrew.
 Transcribe ALL the Hebrew handwriting in this image exactly as written, line by line, top to bottom.
+The writing is often modern Hebrew CURSIVE script (כתב יד), not print letters. Write every letter in its printed (block) form.
+Hebrew is written right to left: the first letter of each line is on the RIGHT.
 Rules:
 - Output only the transcription, in Hebrew letters. No translation, no explanation, no commentary.
 - Keep one output line for each handwritten line. Keep the original line breaks.
@@ -273,9 +275,11 @@ class TesseractEngine:
             langs = (r.stdout or "") + (r.stderr or "")
         except Exception as e:  # noqa
             return False, str(e)
-        if "heb" not in langs.split():
+        ll = langs.split()
+        if "heb" not in ll:
             return False, "Tesseract found but the Hebrew pack 'heb' is missing"
-        return True, exe
+        self.script = "heb_script" in ll or os.path.exists(_script_model())
+        return True, exe + ("  · print + cursive (כתב) models" if self.script else "  · print model")
 
     def read_image(self, img, strips=None, progress=None, cancel=None):
         import tempfile
@@ -290,10 +294,87 @@ class TesseractEngine:
             cv2.imwrite(p, gray)
             if progress:
                 progress(0, 1, "Tesseract reading")
-            r = winproc.run([exe, p, "stdout", "-l", "heb", "--psm", "6"], timeout=300)
-            if r.returncode != 0 and not (r.stdout or "").strip():
-                raise RuntimeError("Tesseract failed: " + (r.stderr or "").strip()[-300:])
-        return clean_transcription(r.stdout)
+            # print model and the cursive (כתב) model; page layouts: a block / columns / scattered letters.
+            # Whatever reads as the most real Hebrew wins.
+            td = []
+            langs = ["heb"]
+            if os.path.exists(_script_model()):
+                td = ["--tessdata-dir", _tessdata_with_script(exe)]
+                langs.append("heb_script")
+            elif "heb_script" in (winproc.run([exe, "--list-langs"], timeout=20).stdout or "").split():
+                langs.append("heb_script")
+            best, best_q = "", -1
+            tries = [(l, psm) for l in langs for psm in ("6", "4", "11")]
+            for k, (lang, psm) in enumerate(tries):
+                if cancel and cancel():
+                    break
+                if progress:
+                    progress(k, len(tries), f"Reading ({'cursive' if lang == 'heb_script' else 'print'} model, layout {psm})")
+                r = winproc.run([exe, p, "stdout", *td, "-l", lang, "--psm", psm], timeout=300)
+                if r.returncode != 0 and not (r.stdout or "").strip():
+                    if k == 0:
+                        raise RuntimeError("Tesseract failed: " + (r.stderr or "").strip()[-300:])
+                    continue
+                txt = clean_transcription(r.stdout)
+                q = text_quality(txt) * (1 + 0.02 * min(len(txt.split()), 20))  # prefer reading more of the page
+                if q > best_q:
+                    best, best_q = txt, q
+        return strip_noise(best)
+
+
+def _script_model():
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, "scanner", "models", "heb_script.traineddata")
+
+
+def _tessdata_with_script(exe):
+    """A tessdata folder that has both heb and heb_script (copied once next to the app's data)."""
+    import tempfile
+    d = os.path.join(tempfile.gettempdir(), "seforim_tessdata")
+    os.makedirs(d, exist_ok=True)
+    src = os.environ.get("TESSDATA_PREFIX") or ""
+    cands = [os.path.join(os.path.dirname(exe), "tessdata"), src, os.path.join(src, "tessdata"),
+             "/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/4.00/tessdata", "/usr/local/share/tessdata"]
+    for name, from_ in (("heb.traineddata", None), ("heb_script.traineddata", _script_model()), ("osd.traineddata", None)):
+        t = os.path.join(d, name)
+        if os.path.exists(t):
+            continue
+        f = from_ or next((os.path.join(c, name) for c in cands if c and os.path.exists(os.path.join(c, name))), None)
+        if f:
+            shutil.copyfile(f, t)
+    return d
+
+
+# ====================================================================== is the text real Hebrew or random symbols?
+_HEB = re.compile(r"[\u05d0-\u05ea]")
+KNOWN_WORDS = set()  # filled by the app from the library's word list (for a better check)
+
+
+def text_quality(text):
+    """0..1 - how much of the output looks like real Hebrew words (not symbols / letter salad)."""
+    toks = [t for t in re.split(r"\s+", text or "") if t]
+    if not toks:
+        return 0.0
+    good = 0
+    for t in toks:
+        letters = _HEB.findall(t)
+        core = "".join(letters)
+        junk = sum(1 for c in t if not (_HEB.match(c) or c in "\"'׳״-.,:;!?()[]0123456789\u05b0-\u05c7"))
+        if len(core) >= 2 and junk == 0:
+            good += 1.0 if (not KNOWN_WORDS or core in KNOWN_WORDS or core.lstrip("ובכלמהש") in KNOWN_WORDS) else 0.5
+    return good / len(toks)
+
+
+def strip_noise(text):
+    """Drop stray symbols Tesseract invents around Hebrew text (| ~ _ » etc.)."""
+    out = []
+    for line in (text or "").splitlines():
+        line = re.sub(r"[|~_^`«»<>{}\\@#$%&*=+§©®™¦]+", " ", line)
+        line = re.sub(r"(?<!\S)[^\u05d0-\u05ea\w\s](?!\S)", " ", line)  # lone symbols
+        line = re.sub(r" {2,}", " ", line).strip()
+        if line and (len(_HEB.findall(line)) >= 2 or re.search(r"\w{2,}", line)):
+            out.append(line)
+    return "\n".join(out)
 
 
 # ====================================================================== registry
