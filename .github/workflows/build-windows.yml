@@ -67,6 +67,26 @@ jobs:
           Write-Host "Sweep problems: $n"
           if ($n -gt 0) { throw "the sweep found $n problems - see ci-results/sweep/report.md" }
 
+      - name: Install for ALL users test
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory ci-results -Force | Out-Null
+          $dir = Join-Path $env:RUNNER_TEMP "PF\Seforim Studio"
+          Start-Process "SeforimStudio-Setup.exe" -ArgumentList "--silent","--allusers","--dir","$dir","--no-launch","--no-fonts" -Wait
+          Write-Host "install.json: $(Get-Content "$dir\install.json" -Raw)"
+          Write-Host "shared folder files: $((Get-ChildItem "$env:ProgramData\SeforimStudio" -Recurse -File | Measure-Object).Count)"
+          Write-Host "public desktop shortcut: $(Test-Path "$env:PUBLIC\Desktop\Seforim Studio.lnk")"
+          $p = Start-Process "$dir\SeforimStudio.exe" -ArgumentList "--no-window","--port","8831" -PassThru
+          Start-Sleep 12
+          $html = (Invoke-WebRequest "http://127.0.0.1:8831/" -UseBasicParsing).Content
+          $tok = [regex]::Match($html, 'TOKEN = "([^"]+)"').Groups[1].Value
+          $loc = Invoke-RestMethod -Method Post "http://127.0.0.1:8831/api/locations" -Headers @{ "X-Token" = $tok } -Body "{}"
+          Write-Host "locations: $($loc | ConvertTo-Json -Compress)"
+          Stop-Process $p
+          if (-not $loc.all_users) { throw "all-users mode not active" }
+          "all users: OK $($loc | ConvertTo-Json -Compress)" | Set-Content ci-results\allusers.txt
+
       - name: Keep the Setup for the AI test
         uses: actions/upload-artifact@v5
         with:
