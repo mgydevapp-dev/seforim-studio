@@ -107,6 +107,9 @@ def copy_packs(dest, log=print):
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
     n = 0
     for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimAI.tar*")):
+        if p.lower().endswith((".crdownload", ".partial", ".download", ".tmp", ".opdownload")):
+            log(f"{os.path.basename(p)} has not finished downloading - skipped")
+            continue
         target = os.path.join(dest, os.path.basename(p))
         if os.path.abspath(p) == os.path.abspath(target) or (os.path.exists(target) and os.path.getsize(target) == os.path.getsize(p)):
             continue

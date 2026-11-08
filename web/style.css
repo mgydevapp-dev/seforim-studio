@@ -216,3 +216,10 @@ svg text { fill: var(--ink); }
 .tree .work .heb { margin-left: 0; color: var(--accent); text-align: right; direction: rtl; font-size: 15.5px; line-height: 1.3; }
 .tree .work.off .heb { color: var(--muted); }
 .tree summary .heb-cat { color: var(--accent2); margin-left: 4px; }
+
+.lib-health { margin: 8px; padding: 10px 12px; border: 1px solid #e0b84f; background: #fff8e1; color: #4a3b10; border-radius: 10px; line-height: 1.45; }
+.lib-health code { font-size: 11px; background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; }
+.lib-health .lh-msg { color: #8a3b12; margin: 4px 0; }
+.lib-health .progress > div { background: #b8892b; height: 100%; }
+[data-theme="dark"] .lib-health { background: #3a3010; color: #f3e6bf; border-color: #8a6d1f; }
+[data-theme="dark"] .lib-health .lh-msg { color: #ffb38a; }

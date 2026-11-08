@@ -11,7 +11,7 @@ const Library = {
       <aside class="lib-side"><div class="side-head">
         <input id="libFilter" placeholder="Filter titles (English or עברית)…">
         <div class="row small"><label><input type="checkbox" id="libDl"> Downloaded only</label><label><input type="checkbox" id="libHid"> Show hidden</label></div>
-      </div><div class="tree" id="libTree"><p class="muted" style="padding:10px">Loading catalog…</p></div></aside>
+      </div><div id="libHealth"></div><div class="tree" id="libTree"><p class="muted" style="padding:10px">Loading catalog…</p></div></aside>
       <div class="reader-area">
         <div class="book-tabs" id="bookTabs"></div>
         <div class="reader-toolbar" id="rTool">
@@ -77,7 +77,45 @@ const Library = {
     this.tree = r.tree; this.imported = new Set(r.imported); this.favorites = new Set(r.favorites); this.hidden = new Set(r.hidden);
     this.userWorks = (await App.api("lib_works")).filter(w => w.source === "user" || !this.inCatalog(w.id));
     this.drawTree();
+    this.drawHealth();
   },
+  /* ---------- "is the whole library installed?" ---------- */
+  async drawHealth() {
+    const el = $("#libHealth"); if (!el) return;
+    const h = await App.api("library_health").catch(() => null);
+    if (!h || !h.total || h.have >= h.total * 0.95) { el.innerHTML = ""; return; }
+    const st = h.install || {}, miss = h.rows.filter(r => r.have < r.total);
+    const running = st.state === "running";
+    el.innerHTML = `<div class="lib-health">
+      <b>📚 ${h.have.toLocaleString()} of ${h.total.toLocaleString()} seforim are installed</b>
+      <div class="small">Missing: ${miss.map(r => `${esc(r.name)} <span class="heb">${esc(r.he || "")}</span> (${r.have}/${r.total})`).join(" · ")}</div>
+      ${running ? `<div class="progress" style="height:10px;margin:6px 0"><div style="width:${st.progress || 0}%"></div></div>
+        <div class="small">Installing the complete library… ${Math.round(st.progress || 0)}% — keep the app open.</div>`
+      : `<div class="small lh-msg">${esc(st.message || "")}</div>
+      <div class="small">To get <b>everything</b> (Talmud, all seforim): download <b>both</b> files
+        <code>SeforimLibrary.sqlite.xz.part1of2</code> (1.99 GB) and <code>…part2of2</code> (0.35 GB) from the download page into your
+        <b>Downloads</b> folder (or onto the USB stick next to SeforimStudio-Setup.exe), then press <b>Install now</b>. About 11 GB of free disk space is needed.</div>
+      <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
+        <button class="btn small primary" id="lhFind">Install now</button>
+        <input id="lhDir" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
+        <button class="btn small" id="lhNet" title="Needs internet (about 4 GB, roughly an hour)">Download missing from the internet</button>
+      </div>`}
+    </div>`;
+    if (running) { clearTimeout(this._lh); this._lh = setTimeout(() => this.drawHealth(), 2000); this._wasInstalling = true; return; }
+    if (this._wasInstalling) { this._wasInstalling = false; if (st.state === "done") { App.toast(st.message); return this.loadTree(); } }
+    $("#lhFind").onclick = async () => {
+      const r = await App.api("install_check", { folder: $("#lhDir").value.trim() || null });
+      if (r.state === "running") return this.drawHealth();
+      App.toast(r.message || "Library files not found", true); this.drawHealth();
+    };
+    $("#lhNet").onclick = async () => {
+      if (!await App.confirm(`Download the ${(h.total - h.have).toLocaleString()} missing seforim from Sefaria now? This needs internet, about 4 GB and roughly an hour. You can keep using the app meanwhile.`)) return;
+      const cats = miss.map(r => r.name);
+      const r = await App.api("dl_start", { categories: cats, english: true, missing_only: true });
+      App.toast(r.started ? `Downloading ${r.count.toLocaleString()} seforim… (see Settings → Library for progress)` : (r.error || "A download is already running"));
+    };
+  },
+  haveIn(n) { return n.works.filter(w => this.imported.has(w.id)).length + n.children.reduce((a, c) => a + this.haveIn(c), 0); },
   inCatalog(id) { const walk = ns => ns.some(n => n.works.some(w => w.id === id) || walk(n.children)); return this.tree ? walk(this.tree) : false; },
   drawTree() {
     const el = $("#libTree"); if (!el) return;
@@ -88,7 +126,7 @@ const Library = {
       const works = n.works.filter(match); works.forEach(w => allWorks.push(w));
       const kids = walk(n.children, depth + 1).filter(Boolean);
       if (!works.length && !kids.length) return "";
-      return `<details ${f || depth < 1 && this.tree.length < 3 ? "open" : ""}><summary>${esc(n.name)} <span class="heb-cat">${esc(n.he || "")}</span><span class="count">${n.count}</span></summary>
+      return `<details ${f || depth < 1 && this.tree.length < 3 ? "open" : ""}><summary>${esc(n.name)} <span class="heb-cat">${esc(n.he || "")}</span><span class="count" title="installed / in catalog">${this.haveIn(n) < n.count ? this.haveIn(n) + "/" : ""}${n.count}</span></summary>
         ${kids.join("")}${works.map(w => this.workRow(w)).join("")}</details>`;
     });
     const favs = [];

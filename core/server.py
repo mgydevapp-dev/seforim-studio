@@ -128,10 +128,16 @@ class App:
 
     def check_ai_install(self, extra_dir=None):
         from . import installer
-        parts, expected = installer.find_parts(installer.search_dirs(os.path.dirname(self.data), self.data, extra_dir), installer.PACKS["ai"])
+        found = installer.scan(installer.search_dirs(os.path.dirname(self.data), self.data, extra_dir), installer.PACKS["ai"])
+        parts = found["parts"]
         if not parts:
-            if expected:
-                self.ai.update(state="incomplete", message=f"Found only some parts of the AI pack (need all {expected}).")
+            if found["problem"]:
+                self.ai.update(state="incomplete", message=found["problem"])
+            return self.ai
+        need, free = installer.free_space(parts, self.data, ratio=1.05)
+        if free < need and not installer.already_installed(self.data, parts, "ai"):
+            self.ai.update(state="error", message=f"Not enough free disk space for the AI pack: needs about {need / 1e9:.0f} GB, "
+                           f"the drive has {free / 1e9:.1f} GB.")
             return self.ai
         if installer.already_installed(self.data, parts, "ai") or self.ai["state"] == "running":
             return self.ai
@@ -174,12 +180,27 @@ class App:
     def check_library_install(self, extra_dir=None):
         from . import installer
         app_dir = os.path.dirname(self.data)
-        parts, expected = installer.find_parts(installer.search_dirs(app_dir, self.data, extra_dir))
-        if not parts:
-            if expected:
-                self.install.update(state="incomplete", message=f"Found only some parts of the library download (need all {expected}).")
+        if self.install["state"] == "running":
             return self.install
-        if installer.already_installed(self.data, parts) or self.install["state"] == "running":
+        if extra_dir:
+            self._extra_dir = extra_dir  # remember the folder the user typed
+        dirs = installer.search_dirs(app_dir, self.data, extra_dir or getattr(self, "_extra_dir", None))
+        found = installer.scan(dirs)
+        parts = found["parts"]
+        if not parts:
+            if found["problem"]:
+                self.install.update(state="incomplete", message=found["problem"])
+            elif self.install["state"] != "done":
+                self.install.update(state="missing", message="The library files (SeforimLibrary.sqlite.xz.part1of2 and part2of2) "
+                                    "were not found. Looked in: " + "; ".join(dirs[:8]))
+            return self.install
+        if installer.already_installed(self.data, parts) and self._library_complete():
+            return self.install
+        need, free = installer.free_space(parts, self.data)
+        if free < need:
+            self.install.update(state="error", message=f"Not enough free disk space to unpack the library: it needs about "
+                                f"{need / 1e9:.0f} GB free, and the drive with {self.data} has {free / 1e9:.1f} GB. "
+                                f"Free up space (or move the whole SeforimStudio folder to a bigger drive) and press Install again.")
             return self.install
         self.install.update(state="running", progress=0, message="Installing the seforim library (one time)…",
                             files=[os.path.basename(p) for p in parts])
@@ -216,6 +237,35 @@ class App:
                 self.install.update(state="error", message=f"Could not install the library: {e}")
         threading.Thread(target=run, daemon=True).start()
         return self.install
+
+    def _library_complete(self):
+        """True when (almost) every sefer of the catalog has its text in the library."""
+        if not self.catalog:
+            return True
+        have = self.lib.q1("SELECT COUNT(*) n FROM works WHERE n_passages>0")["n"]
+        return have >= 0.95 * self.catalog.info()["works"]
+
+    def api_library_health(self, a):
+        """Per section of the library: how many seforim the catalog has and how many are installed with text."""
+        if not self.catalog:
+            return {"rows": [], "total": 0, "have": 0, "install": self.install}
+        cat = {r["top"]: r["n"] for r in self.catalog.q(
+            "SELECT CASE WHEN instr(category_path,' > ')>0 THEN substr(category_path,1,instr(category_path,' > ')-1) "
+            "ELSE category_path END AS top, COUNT(*) n FROM works GROUP BY top")}
+        ids = {r["id"]: r for r in self.catalog.q("SELECT id, category_path FROM works")}
+        have = {}
+        for r in self.lib.q("SELECT id FROM works WHERE n_passages>0"):
+            c = ids.get(r["id"])
+            if c:
+                top = c["category_path"].split(" > ")[0]
+                have[top] = have.get(top, 0) + 1
+        from .order import he_name
+        rows = [{"name": k, "he": he_name(k), "total": v, "have": have.get(k, 0)} for k, v in cat.items()]
+        rows.sort(key=lambda r: -r["total"])
+        if self.install["state"] in ("idle", "missing", "incomplete", "error"):
+            self.check_library_install()
+        return {"rows": rows, "total": sum(cat.values()), "have": sum(have.values()), "install": self.install,
+                "online_download": self.dl.state.get("running", False) if self.dl else False}
 
     def _cleanup_parts(self, parts):
         """Remove part files that Setup copied INTO the app folder (never touches the user's Downloads)."""
@@ -748,6 +798,9 @@ class App:
         if a.get("categories"):
             ids += [w["id"] for w in self.catalog.works_in(a["categories"])]
         ids = sorted(set(ids))
+        if a.get("missing_only"):
+            have = {r["id"] for r in self.lib.q("SELECT id FROM works WHERE n_passages>0")}
+            ids = [i for i in ids if i not in have]
         ok = self.dl.start(ids, a.get("english", True), True, a.get("links", False))
         return {"started": ok, "count": len(ids)}
 

@@ -14,48 +14,104 @@ import sqlite3
 PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar"}
 
 
+PART_SIZE = 1900 * 1024 * 1024  # every part except the last one is exactly this big (split -b 1900M)
+UNFINISHED = (".crdownload", ".partial", ".download", ".tmp", ".opdownload")
+
+
 def _part_re(base):
-    return re.compile(re.escape(base) + r"(?:\.part(\d+)of(\d+))?$", re.I)
+    # also accept the names browsers give a second download: "SeforimLibrary.sqlite.xz (1).part1of2"
+    return re.compile(re.escape(base) + r"(?: ?\(\d+\))?(?:\.part(\d+)of(\d+))?$", re.I)
 
 
 PART_RE = _part_re(PACKS["library"])
 
 
 def search_dirs(app_dir, data_dir, extra=None):
+    """Folders where downloaded library / AI files are looked for: the app folder, Downloads, Desktop, Documents,
+    OneDrive, the folder the Setup ran from, and every USB stick / other drive (its top folder and one level below)."""
     home = os.path.expanduser("~")
-    dirs = [app_dir, data_dir, os.path.join(home, "Downloads"), os.path.join(home, "Desktop")]
-    if extra:
-        dirs.insert(0, extra)
+    dirs = [extra, app_dir, data_dir]
+    for base in (home, os.path.join(home, "OneDrive")):
+        dirs += [os.path.join(base, n) for n in ("Downloads", "Desktop", "Documents")]
+    dirs.append(home)
+    if os.name == "nt":
+        import string
+        for L in string.ascii_uppercase[2:]:
+            root = f"{L}:\\"
+            if os.path.isdir(root):
+                dirs.append(root)
+                try:
+                    for p in glob.glob(os.path.join(root, "*", "Seforim*")):
+                        dirs.append(os.path.dirname(p))
+                except OSError:
+                    pass
     out = []
     for d in dirs:
-        if d and os.path.isdir(d) and os.path.abspath(d) not in out:
-            out.append(os.path.abspath(d))
+        try:
+            if d and os.path.isdir(d) and os.path.abspath(d) not in out:
+                out.append(os.path.abspath(d))
+        except OSError:
+            pass
     return out
 
 
-def find_parts(dirs, base=PACKS["library"]):
-    """Return (list of part paths in order, total parts expected) for the first complete set found."""
+def scan(dirs, base=PACKS["library"]):
+    """Look for a complete, fully downloaded set of parts.
+    Returns {"parts": [...], "expected": n, "problem": "plain-English explanation or ''"}."""
     rx = _part_re(base)
+    problems = []
     for d in dirs:
-        files = {}
-        single = None
-        expected = None
-        for p in glob.glob(os.path.join(d, base + "*")):
-            m = rx.search(os.path.basename(p))
-            if not m:
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        sets, single = {}, None
+        for n in names:
+            if not n.lower().startswith(base.lower()):
+                continue
+            p = os.path.join(d, n)
+            if n.lower().endswith(UNFINISHED):
+                problems.append(f"{n} in {d} is still downloading (or the download stopped). Let the download finish, then press Install again.")
+                continue
+            m = rx.search(n)
+            if not m or not os.path.isfile(p):
                 continue
             if m.group(1) is None:
                 single = p
             else:
-                files[int(m.group(1))] = p
-                expected = int(m.group(2))
+                sets.setdefault(int(m.group(2)), {}).setdefault(int(m.group(1)), p)
         if single:
-            return [single], 1
-        if files:
-            if expected and all(i in files for i in range(1, expected + 1)):
-                return [files[i] for i in range(1, expected + 1)], expected
-            return [], expected or 0  # incomplete set — tell the user
-    return [], 0
+            return {"parts": [single], "expected": 1, "problem": ""}
+        for total, files in sorted(sets.items(), key=lambda kv: -len(kv[1])):
+            missing = [i for i in range(1, total + 1) if i not in files]
+            if missing:
+                problems.append(f"In {d}: found {len(files)} of the {total} parts - part {', '.join(map(str, missing))} is missing. "
+                                f"Download every {base}.part…of{total} file into the same folder.")
+                continue
+            short = [i for i in range(1, total) if os.path.getsize(files[i]) != PART_SIZE]
+            if short:
+                problems.append(f"In {d}: part {', '.join(map(str, short))} is not completely downloaded "
+                                f"({os.path.getsize(files[short[0]]) / 1e9:.2f} GB of {PART_SIZE / 1e9:.2f} GB). Delete it and download it again.")
+                continue
+            return {"parts": [files[i] for i in range(1, total + 1)], "expected": total, "problem": ""}
+    return {"parts": [], "expected": 0, "problem": " ".join(dict.fromkeys(problems))}
+
+
+def find_parts(dirs, base=PACKS["library"]):
+    """Return (list of part paths in order, total parts expected) for the first complete set found."""
+    r = scan(dirs, base)
+    return r["parts"], r["expected"]
+
+
+def free_space(parts, data_dir, ratio=5.0):
+    """(bytes needed, bytes free) for unpacking next to data/: the library grows about 4.6x when unpacked."""
+    import shutil
+    need = int(sum(os.path.getsize(p) for p in parts) * ratio) + (500 << 20)
+    try:
+        free = shutil.disk_usage(data_dir).free
+    except OSError:
+        free = need
+    return need, free
 
 
 def signature(parts):
