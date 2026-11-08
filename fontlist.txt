@@ -1,0 +1,18 @@
+/usr/share/fonts/truetype/culmus/ElliniaCLM-BoldItalic.otf
+/usr/share/fonts/truetype/culmus/ElliniaCLM-LightItalic.otf
+f1/fonts/otf/GveretLevin-Regular.otf
+f1/fonts/ttf/GveretLevin-Regular.ttf
+f2/Fonts/Hebrew Letters only/CTAN TeX Archive/makor2 (GPL)/ktavbold.ttf
+f2/Fonts/Hebrew Letters only/CTAN TeX Archive/makor2 (GPL)/ktavmed.ttf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Basic Fonts/Ellinia/ElliniaCLM-BoldItalic.otf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Basic Fonts/Ellinia/ElliniaCLM-LightItalic.otf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Fancy Fonts/anka/AnkaCLM-Bold.ttf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Fancy Fonts/anka/anka-otf/AnkaCLM-Bold.otf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Fancy Fonts/ktav-yad/KtavYadCLM-BoldItalic.ttf
+f2/Fonts/Hebrew Letters only/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Fancy Fonts/ktav-yad/KtavYadCLM-MediumItalic.ttf
+f2/Fonts/Hebrew Letters only/Refoyl Finkl (GPL+FE)/nachlaot/Nachlaot.ttf
+f2/Fonts/Hebrew Letters only/Refoyl Finkl (GPL+FE)/refoyl/Refoyl.ttf
+f2/Fonts/Hebrew Letters with Vowels (no cantillation)/Culmus Project (GPL and GPL+FE)/Maxim Iorsh (GPL)/Fancy Fonts/dorian/DorianCLM-BookItalic.ttf
+f2/Fonts/Hebrew Letters with Vowels (no cantillation)/Culmus Project (GPL and GPL+FE)/Yoram Gnat (GPL+FE)/Shmulik CLM/ShmulikCLM.ttf
+f2/Fonts/Hebrew Letters with Vowels (no cantillation)/Refoyl Finkl (GPL+FE)/Mashkit/Mashkit.ttf
+f2/Fonts/Hebrew Letters with Vowels (no cantillation)/Shavit Yaacov (OFL)/GveretLevinAlefAlefAlef.otf
