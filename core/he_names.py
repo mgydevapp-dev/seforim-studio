@@ -69,7 +69,7 @@ NAMES = {
     "Onkelos": "אונקלוס", "Targum Jonathan": "תרגום יונתן", "Targum Jerusalem": "תרגום ירושלמי", "Targum Neofiti": "תרגום ניאופיטי",
     "Saadia Gaon": "רס״ג", "Tafsir Rasag": "תפסיר רס״ג", "Bekhor Shor": "בכור שור", "Ralbag Beur HaMilot": "רלב״ג ביאור המילות",
     "Maharsha": "מהרש״א", "Maharshal": "מהרש״ל", "Maharam": "מהר״ם", "Maharam Schiff": "מהר״ם שיף", "Maharam of Padua": "מהר״ם פדואה",
-    "Penei Yehoshua": "פני יהושע", "Rashash": "רש״ש", "Gilyon HaShas": "גליון הש״ס", "Mesorat HaShas": "מסורת הש״ס",
+    "Penei Yehoshua": "פני יהושע", "Rashash": "רש״ש", "Gilyon HaShas": "גליון הש״ס", "Mesorat HaShas": "מסורת הש״ס", "Ein Mishpat Ner Mitzvah": "עין משפט נר מצוה", "Torah Ohr": "תורה אור", "Hagahot HaBach": "הגהות הב״ח", "Hagahot HaGra": "הגהות הגר״א", "Tosafot Yom Tov": "תוספות יום טוב",
     "Shita Mekubetzet": "שיטה מקובצת", "Nimukei Yosef": "נמוקי יוסף", "Mordechai": "מרדכי", "Baal HaMaor": "בעל המאור",
     "Piskei Tosafot": "פסקי תוספות", "Tosafot HaRosh": "תוספות הרא״ש", "Tosafot Rid": "תוספות רי״ד", "Tosafot Yeshanim": "תוספות ישנים",
     "Tosafot Shantz": "תוספות שאנץ", "Tosafot Ri HaZaken": "תוספות רי״ד הזקן", "Tosafot Rabbi Akiva Eiger": "תוספות רבי עקיבא איגר",

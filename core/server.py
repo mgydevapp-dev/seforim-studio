@@ -62,19 +62,24 @@ class Jobs:
 
 
 class App:
-    def __init__(self, base_dir, data_dir=None):
+    def __init__(self, base_dir, data_dir=None, shared_dir=None):
         self.base = base_dir
         self.data = data_dir or os.path.join(base_dir, "data")
+        # shared = the big things installed once for everyone (library, AI models, fonts, catalog).
+        # Normally the same folder; "install for all users" puts it in ProgramData and keeps notes per user.
+        self.shared = shared_dir or self.data
+        os.makedirs(self.shared, exist_ok=True)
         self.web = os.path.join(base_dir, "web")
         for d in ("exports", "scans", "uploads", "profiles", "inbox", "fonts", "backups", "plugins"):
             os.makedirs(os.path.join(self.data, d), exist_ok=True)
         self.token = secrets.token_urlsafe(16)
         self.jobs = Jobs()
-        self.lib = Library(os.path.join(self.data, "library.sqlite"))
+        self.lib = Library(self.lib_path())
         self.user = UserData(os.path.join(self.data, "profiles"), self._last_profile())
         self.catalog = None
         # Prefer the catalog inside the data folder, so the portable folder can be moved to another computer.
-        for cat_path in (os.path.join(self.data, "seforim_catalog.db"), self.user.get_setting("catalog_path") or ""):
+        for cat_path in (os.path.join(self.shared, "seforim_catalog.db"), os.path.join(self.data, "seforim_catalog.db"),
+                         self.user.get_setting("catalog_path") or ""):
             if cat_path and os.path.exists(cat_path):
                 try:
                     self.load_catalog(cat_path)
@@ -93,8 +98,132 @@ class App:
         self.start_bundled_ollama()
 
     # ------------------------------------------------------------------ bundled AI reader (Ollama + model)
+    # ------------------------------------------------------------------ where the library and AI models live
+    def locations(self):
+        """locations.json (in the shared folder or next to the app) can point the library / AI models anywhere,
+        e.g. a USB stick:  {"library": "E:\\SeforimLibrary\\library.sqlite", "ai": "E:\\SeforimAI\\ai"}"""
+        out = {}
+        for d in (os.path.dirname(os.path.abspath(self.data)), self.shared):
+            f = os.path.join(d, "locations.json")
+            if os.path.exists(f):
+                try:
+                    out.update(json.load(open(f, encoding="utf-8")))
+                except Exception:
+                    pass
+        return out
+
+    def set_location(self, key, value):
+        f = os.path.join(self.shared, "locations.json")
+        cur = {}
+        if os.path.exists(f):
+            try:
+                cur = json.load(open(f, encoding="utf-8"))
+            except Exception:
+                pass
+        if value:
+            cur[key] = value
+        else:
+            cur.pop(key, None)
+        json.dump(cur, open(f, "w", encoding="utf-8"), indent=1)
+
+    def lib_path(self):
+        p = self.locations().get("library")
+        if p and os.path.exists(p):
+            return p
+        return os.path.join(self.shared, "library.sqlite")
+
+    @staticmethod
+    def _has_ollama(d):
+        return d and any(os.path.exists(os.path.join(d, "ollama", n)) for n in ("ollama.exe", "ollama"))
+
+    def find_ai_on_drives(self):
+        """An AI pack on a USB stick / other drive is used straight from there (no copying)."""
+        if getattr(self, "_usb_ai", None) is not None:
+            return self._usb_ai
+        found = ""
+        if os.name == "nt":
+            import string
+            for L in string.ascii_uppercase[2:]:
+                root = f"{L}:\\"
+                if not os.path.isdir(root):
+                    continue
+                cands = [os.path.join(root, "SeforimAI", "ai"), os.path.join(root, "SeforimAI"), os.path.join(root, "ai"),
+                         os.path.join(root, "SeforimStudio", "data", "ai")]
+                try:
+                    cands += glob.glob(os.path.join(root, "*", "data", "ai")) + glob.glob(os.path.join(root, "*", "SeforimAI", "ai"))
+                except OSError:
+                    pass
+                found = next((c for c in cands if self._has_ollama(c)), "")
+                if found:
+                    break
+        self._usb_ai = found
+        return found
+
     def ai_dir(self):
-        return os.path.join(self.data, "ai")
+        loc = self.locations().get("ai")
+        if self._has_ollama(loc):
+            return loc
+        own = os.path.join(self.shared, "ai")
+        if self._has_ollama(own):
+            return own
+        return self.find_ai_on_drives() or own
+
+    def api_locations(self, a):
+        if "ai" in a or "library" in a:
+            for k in ("ai", "library"):
+                if k in a:
+                    v = (a[k] or "").strip().strip('"')
+                    if k == "ai" and v:
+                        for c in (v, os.path.join(v, "ai"), os.path.join(v, "SeforimAI", "ai"), os.path.join(v, "data", "ai")):
+                            if self._has_ollama(c):
+                                v = c
+                                break
+                        else:
+                            raise ValueError("No AI models found in that folder (it should contain the 'ollama' and 'models' folders).")
+                    if k == "library" and v:
+                        if os.path.isdir(v):
+                            v = os.path.join(v, "library.sqlite")
+                        if not os.path.exists(v):
+                            raise ValueError("No library.sqlite in that folder.")
+                    self.set_location(k, v)
+            self._usb_ai = None
+            if "library" in a:
+                with self.lib.lock:
+                    self.lib.close()
+                    self.lib = Library(self.lib_path())
+                    if self.catalog:
+                        self.dl.lib = self.lib
+            if "ai" in a:
+                if self.ollama_proc:
+                    self.ollama_proc.terminate()
+                    self.ollama_proc = None
+                self.start_bundled_ollama()
+        return {"library": self.lib_path(), "ai": self.ai_dir(), "ai_found": self._has_ollama(self.ai_dir()),
+                "data": self.data, "shared": self.shared, "all_users": self.shared != self.data, "custom": self.locations()}
+
+    def api_copy_ai(self, a):
+        """Copy the installed AI models to a folder / USB stick (to use on other computers or keep them off drive C:)."""
+        src = self.ai_dir()
+        if not self._has_ollama(src):
+            raise ValueError("The AI pack is not installed yet")
+        dest = os.path.join(a["folder"], "SeforimAI", "ai")
+
+        def run(progress=None, cancel=None):
+            files = [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
+            total = sum(os.path.getsize(f) for f in files) or 1
+            done = 0
+            for f in files:
+                t = os.path.join(dest, os.path.relpath(f, src))
+                os.makedirs(os.path.dirname(t), exist_ok=True)
+                if not (os.path.exists(t) and os.path.getsize(t) == os.path.getsize(f)):
+                    shutil.copyfile(f, t)
+                done += os.path.getsize(f)
+                if progress:
+                    progress(done, total, f"Copying AI models… {done / 1e9:.1f} of {total / 1e9:.1f} GB")
+            if a.get("use"):
+                self.api_locations({"ai": dest})
+            return {"folder": dest}
+        return {"job": self.jobs.start(run)}
 
     def bundled_ollama(self):
         for name in ("ollama.exe", "ollama"):
@@ -128,18 +257,18 @@ class App:
 
     def check_ai_install(self, extra_dir=None):
         from . import installer
-        found = installer.scan(installer.search_dirs(os.path.dirname(self.data), self.data, extra_dir), installer.PACKS["ai"])
+        found = installer.scan(installer.search_dirs(os.path.dirname(self.shared), self.shared, extra_dir), installer.PACKS["ai"])
         parts = found["parts"]
         if not parts:
             if found["problem"]:
                 self.ai.update(state="incomplete", message=found["problem"])
             return self.ai
-        need, free = installer.free_space(parts, self.data, ratio=1.05)
-        if free < need and not installer.already_installed(self.data, parts, "ai"):
+        need, free = installer.free_space(parts, self.shared, ratio=1.05)
+        if free < need and not installer.already_installed(self.shared, parts, "ai"):
             self.ai.update(state="error", message=f"Not enough free disk space for the AI pack: needs about {need / 1e9:.0f} GB, "
                            f"the drive has {free / 1e9:.1f} GB.")
             return self.ai
-        if installer.already_installed(self.data, parts, "ai") or self.ai["state"] == "running":
+        if installer.already_installed(self.shared, parts, "ai") or self.ai["state"] == "running":
             return self.ai
         self.ai.update(state="running", progress=0, message="Installing the AI handwriting reader (one time)…")
 
@@ -156,7 +285,7 @@ class App:
                     shutil.rmtree(self.ai_dir(), ignore_errors=True)
                 shutil.move(src, self.ai_dir())
                 shutil.rmtree(tmp, ignore_errors=True)
-                installer.mark_installed(self.data, parts, "ai")
+                installer.mark_installed(self.shared, parts, "ai")
                 self._cleanup_parts(parts)
                 started = self.start_bundled_ollama()
                 self.ai.update(state="done", progress=100,
@@ -184,7 +313,9 @@ class App:
             return self.install
         if extra_dir:
             self._extra_dir = extra_dir  # remember the folder the user typed
-        dirs = installer.search_dirs(app_dir, self.data, extra_dir or getattr(self, "_extra_dir", None))
+        dirs = installer.search_dirs(app_dir, self.shared, extra_dir or getattr(self, "_extra_dir", None))
+        if self.shared != self.data:
+            dirs.insert(1, self.data)
         found = installer.scan(dirs)
         parts = found["parts"]
         if not parts:
@@ -194,19 +325,19 @@ class App:
                 self.install.update(state="missing", message="The library files (SeforimLibrary.sqlite.xz.part1of2 and part2of2) "
                                     "were not found. Looked in: " + "; ".join(dirs[:8]))
             return self.install
-        if installer.already_installed(self.data, parts) and self._library_complete():
+        if installer.already_installed(self.shared, parts) and self._library_complete():
             return self.install
-        need, free = installer.free_space(parts, self.data)
+        need, free = installer.free_space(parts, self.shared)
         if free < need:
             self.install.update(state="error", message=f"Not enough free disk space to unpack the library: it needs about "
-                                f"{need / 1e9:.0f} GB free, and the drive with {self.data} has {free / 1e9:.1f} GB. "
+                                f"{need / 1e9:.0f} GB free, and the drive with {self.shared} has {free / 1e9:.1f} GB. "
                                 f"Free up space (or move the whole SeforimStudio folder to a bigger drive) and press Install again.")
             return self.install
         self.install.update(state="running", progress=0, message="Installing the seforim library (one time)…",
                             files=[os.path.basename(p) for p in parts])
 
         def run():
-            path = os.path.join(self.data, "library.sqlite")
+            path = self.lib_path()
             tmp = path + ".installing"
             try:
                 for f in (tmp, tmp + "-wal", tmp + "-shm"):
@@ -229,7 +360,7 @@ class App:
                     self.lib = Library(path)
                     if self.catalog:
                         self.dl.lib = self.lib
-                installer.mark_installed(self.data, parts)
+                installer.mark_installed(self.shared, parts)
                 self._cleanup_parts(parts)
                 self.install.update(state="done", progress=100, message=f"Library installed: {n:,} seforim" + (f" (kept {kept} of your own)" if kept else ""))
             except Exception as e:  # noqa
@@ -271,7 +402,7 @@ class App:
         """Remove part files that Setup copied INTO the app folder (never touches the user's Downloads)."""
         app_dir = os.path.abspath(os.path.dirname(self.data))
         for p in parts:
-            if os.path.dirname(os.path.abspath(p)) in (app_dir, os.path.abspath(self.data)):
+            if os.path.dirname(os.path.abspath(p)) in (app_dir, os.path.abspath(self.data), os.path.abspath(self.shared)):
                 try:
                     os.remove(p)
                 except OSError:
@@ -334,7 +465,8 @@ class App:
         return os.path.join(self.data, "exports", safe)
 
     def file_url(self, path):
-        rel = os.path.relpath(path, self.data).replace(os.sep, "/")
+        base = self.shared if self.shared != self.data and os.path.abspath(path).startswith(os.path.join(os.path.abspath(self.shared), "fonts")) else self.data
+        rel = os.path.relpath(path, base).replace(os.sep, "/")
         return "/files/" + urllib.parse.quote(rel)
 
     def scope_with_hidden(self, scope):
@@ -525,6 +657,38 @@ class App:
     def api_histogram(self, a):
         return {"categories": self.lib.category_histogram(a["q"], a.get("lang", "auto"), a.get("opts")),
                 "eras": self.lib.era_histogram(a["q"], a.get("lang", "auto"), a.get("opts"))}
+    def api_daf(self, a):
+        """One amud laid out like the Vilna Shas: the Gemara, and every commentary on this tractate for this daf
+        (Rashi, Tosafos, Rabbeinu Chananel, Maharsha, Ein Mishpat …), each piece tagged with the Gemara line it explains."""
+        from .order import he_name
+        w = self.lib.work(int(a["work_id"]))
+        ch, node = a.get("chapter", ""), a.get("node", "")
+        gem = [] if a.get("names_only") else self.lib.chapter(w["id"], node, ch)
+        comms = self.lib.q("SELECT id, title, he_title FROM works WHERE n_passages>0 AND (title LIKE ? OR title LIKE ?)",
+                           ("% on " + w["title"], "% on " + w["title"] + ",%"))
+        first = {"Rashi": 0, "Tosafot": 1, "Rabbeinu Chananel": 2, "Ein Mishpat Ner Mitzvah": 8, "Mesorat HaShas": 9, "Torah Ohr": 10}
+        out = []
+        for c in comms:
+            if a.get("names_only"):
+                n = self.lib.q1("SELECT COUNT(*) n FROM passages WHERE work_id=? AND chapter=?", (c["id"], ch))["n"]
+                rows = [{"verse": ""}] * n
+            else:
+                rows = self.lib.q("SELECT id, ref, he, en, verse FROM passages WHERE work_id=? AND chapter=? ORDER BY seq", (c["id"], ch))
+            if not rows:
+                continue
+            name = c["title"][:-len(" on " + w["title"])] if c["title"].endswith(" on " + w["title"]) else c["title"].split(" on ")[0]
+            for r in rows:
+                r["anchor"] = (r["verse"] or "").split(":")[0]
+            hn = he_name(name)
+            out.append({"title": name, "he_title": (hn if hn and hn != name else "") or (c["he_title"] or "").split(" על ")[0] or name,
+                        "work_id": c["id"], "passages": rows})
+        out.sort(key=lambda c: (first.get(c["title"], 5), -len(c["passages"])))
+        if a.get("names_only"):
+            out = [{"title": c["title"], "he_title": c["he_title"], "work_id": c["work_id"], "n": len(c["passages"])} for c in out]
+            gem = []
+        return {"title": w["title"], "he_title": w.get("he_title") or he_name(w["title"]), "chapter": ch, "gemara": gem,
+                "commentaries": out}
+
     def api_network(self, a): return self.lib.citation_network(a.get("limit", 40))
     def api_compare_refs(self, a): return self.lib.compare_versions(a.get("refs", []))
 
@@ -865,23 +1029,23 @@ class App:
     # ---- fonts
     def api_fonts(self, a):
         out = []
-        for p in sorted(glob.glob(os.path.join(self.data, "fonts", "*", "*.woff2")) + glob.glob(os.path.join(self.data, "fonts", "*", "*.ttf"))):
+        for p in sorted(glob.glob(os.path.join(self.shared, "fonts", "*", "*.woff2")) + glob.glob(os.path.join(self.shared, "fonts", "*", "*.ttf"))):
             fam = os.path.basename(os.path.dirname(p))
             out.append({"family": fam, "url": self.file_url(p), "file": os.path.basename(p)})
         return out
 
     def api_fonts_download(self, a):
         from .fonts import download_font_pack
-        return {"job": self.jobs.start(download_font_pack, os.path.join(self.data, "fonts"), a.get("families"))}
+        return {"job": self.jobs.start(download_font_pack, os.path.join(self.shared, "fonts"), a.get("families"))}
 
     def api_fonts_install_windows(self, a):
         from .fonts import install_windows
-        return install_windows(os.path.join(self.data, "fonts"))
+        return install_windows(os.path.join(self.shared, "fonts"))
 
     def api_fonts_import(self, a):
         p = self._upload_path(a["upload"])
         fam = re.sub(r"[^\w \-]", "", a.get("family") or os.path.splitext(os.path.basename(p))[0]).strip() or "Custom"
-        d = os.path.join(self.data, "fonts", fam); os.makedirs(d, exist_ok=True)
+        d = os.path.join(self.shared, "fonts", fam); os.makedirs(d, exist_ok=True)
         shutil.copy2(p, os.path.join(d, os.path.basename(p)))
         return {"ok": True, "family": fam}
 
@@ -936,8 +1100,25 @@ class App:
                 sub = (lambda j, n, label, i=i: progress(i, len(pages), f"Page {i + 1}/{len(pages)} — {label}")) if progress else None
                 if progress:
                     progress(i, len(pages), f"Page {i + 1}/{len(pages)} — {eng.name}")
+                hard = a.get("quality") == "hard"
+                n_strips = int(strips) if strips else (3 if hard and eng.key == "ollama" else None)
                 try:
-                    out.append(eng.read_image(engines.imread(path), int(strips) if strips else None, sub, cancel))
+                    if hard and eng.key != "ollama":
+                        # unclear / messy page: read the enhanced grey, the black & white and an enlarged copy - keep the best
+                        import cv2
+                        cands = [x for x in (p["files"].get("gray"), p["files"].get("bw"), p["files"].get("color")) if x]
+                        best, bq = "", -1
+                        for c in cands:
+                            img = engines.imread(c)
+                            for scale in (1.0, 1.6):
+                                im = img if scale == 1.0 else cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                                t = eng.read_image(im, n_strips, sub, cancel)
+                                q = engines.text_quality(t)
+                                if q > bq:
+                                    best, bq = t, q
+                        out.append(best)
+                    else:
+                        out.append(eng.read_image(engines.imread(path), n_strips, sub, cancel))
                 except Exception as e:  # noqa
                     out.append(f"[page {i + 1}: {e}]")
             if progress:
@@ -955,7 +1136,7 @@ class App:
                         "block letters, so it comes out as random symbols. " +
                         ("Choose engine A (AI) to read handwriting." if ai_ok else
                          "To read handwriting, install the AI reader: download the 3 SeforimAI.tar.part… files into Downloads, "
-                         "then press 'Install AI reader' above (or restart the app)."))
+                         "then press 'Install AI pack' under 'Readers on this computer' (or restart the app)."))
             return {"engine": eng.name, "pages": out, "quality": quality, "warning": warn}
         return {"job": self.jobs.start(run), "engine": eng.name}
 
@@ -1148,6 +1329,8 @@ def make_handler(app):
             if u.path.startswith("/files/"):
                 if qs.get("t", [""])[0] != app.token and not u.path.startswith("/files/fonts/"):
                     return self._send(403, {"error": "token"})
+                if u.path.startswith("/files/fonts/") and app.shared != app.data:
+                    return self._serve_file(app.shared, u.path[7:])
                 return self._serve_file(app.data, u.path[7:], download=qs.get("dl", ["0"])[0] == "1")
             if u.path == "/plugins.js":
                 return self._send(200, app.pm.all_js(), "text/javascript; charset=utf-8")

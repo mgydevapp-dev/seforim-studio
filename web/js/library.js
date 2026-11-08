@@ -86,8 +86,8 @@ const Library = {
     if (!h || !h.total || h.have >= h.total * 0.95) { el.innerHTML = ""; return; }
     const st = h.install || {}, miss = h.rows.filter(r => r.have < r.total);
     const running = st.state === "running";
-    el.innerHTML = `<div class="lib-health">
-      <b>📚 ${h.have.toLocaleString()} of ${h.total.toLocaleString()} seforim are installed</b>
+    el.innerHTML = `<details class="lib-health" ${running || this._lhOpen ? "open" : ""}>
+      <summary><b>📚 ${h.have.toLocaleString()} of ${h.total.toLocaleString()} seforim installed</b> <span class="small">— ${running ? "installing…" : "get the rest ›"}</span></summary>
       <div class="small">Missing: ${miss.map(r => `${esc(r.name)} <span class="heb">${esc(r.he || "")}</span> (${r.have}/${r.total})`).join(" · ")}</div>
       ${running ? `<div class="progress" style="height:10px;margin:6px 0"><div style="width:${st.progress || 0}%"></div></div>
         <div class="small">Installing the complete library… ${Math.round(st.progress || 0)}% — keep the app open.</div>`
@@ -100,7 +100,8 @@ const Library = {
         <input id="lhDir" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
         <button class="btn small" id="lhNet" title="Needs internet (about 4 GB, roughly an hour)">Download missing from the internet</button>
       </div>`}
-    </div>`;
+    </details>`;
+    $("details", el).ontoggle = e => { this._lhOpen = e.target.open; };
     if (running) { clearTimeout(this._lh); this._lh = setTimeout(() => this.drawHealth(), 2000); this._wasInstalling = true; return; }
     if (this._wasInstalling) { this._wasInstalling = false; if (st.state === "done") { App.toast(st.message); return this.loadTree(); } }
     $("#lhFind").onclick = async () => {
@@ -265,10 +266,27 @@ const Library = {
       if (key !== lastCh) { html += `<div class="chapter-title">${t.he_title ? `<span class="he">${esc(t.he_title)}</span> · ` : ""}${esc(t.title)} · ${esc(this.chapterLabel(t, { chapter: p.chapter, node: p.node }))}${p.node ? ` <div class="small muted">${esc(p.node)}</div>` : ""}</div>`; lastCh = key; }
       html += this.psgHtml(p, t);
     }
-    el.innerHTML = html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
+    el.innerHTML = `<div class="comm-bar" id="rChips"></div>` + html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
     $("#rNext2").onclick = () => this.step(1);
+    this.drawCommChips(t, cur);
     this.bindPassages(el, t);
     if (this.selected) { const s = $(`.psg[data-id="${this.selected}"]`, el); if (s) s.classList.add("sel"); }
+  },
+  /* buttons for every commentary on this chapter / daf: click one to read it beside the text */
+  async drawCommChips(t, cur) {
+    const ch = (cur && cur.chapter) || (t.passages[0] || {}).chapter; if (!ch) return;
+    const d = await App.api("daf", { work_id: t.work_id, node: (cur && cur.node) || "", chapter: ch, names_only: true }).catch(() => null);
+    const box = $("#rChips"); if (!box || !d || this.tab() !== t) return;
+    const isDaf = /^\d+[ab]$/.test(ch);
+    box.innerHTML = (isDaf ? `<button class="chip on" id="rDafBtn">📜 Daf layout (Vilna)</button>` : "") +
+      (d.commentaries.length ? `<span class="small muted">Commentaries:</span> ` + d.commentaries.map(c => `<button class="chip ${this.commFilter === c.title ? "on" : ""}" data-cf="${esc(c.title)}" title="${esc(c.title)} · ${c.n}">${esc(c.he_title)} <small>${c.n}</small></button>`).join("")
+        + (this.commFilter ? ` <button class="chip" data-cf="">✕ all</button>` : "") : "");
+    const db = $("#rDafBtn", box); if (db) db.onclick = () => { this.view.mode = "daf"; $("#rMode").value = "daf"; this.redraw(); };
+    $$("[data-cf]", box).forEach(b => b.onclick = () => {
+      this.commFilter = b.dataset.cf || null; this.view.comm = true; $("#rComm").checked = true; this.layoutPanes();
+      this.drawCommChips(t, cur);
+      const p = t.passages.find(x => x.id === this.selected) || t.passages[0]; if (p) this.select(p.id, true);
+    });
   },
   bindPassages(el, t) {
     el.onclick = e => {
@@ -301,28 +319,129 @@ const Library = {
   },
   async loadConnections(p) {
     const el = $("#rComm2"); el.innerHTML = `<p class="muted small">Loading connections for ${esc(p.ref)}…</p>`;
-    const groups = await App.api("connections", { ref: p.ref });
+    let groups = await App.api("connections", { ref: p.ref });
     if (this.selected !== p.id) return;
-    el.innerHTML = `<div class="row"><b>${esc(p.ref)}</b> <span class="he-name">${esc(App.heRef(p.ref, this.tab().he_title, this.tab().title))}</span><span class="spacer"></span><button class="btn small" id="cLink">+ My link</button></div>` + (groups.length ? groups.map(g => `<div class="comm-group"><h4><span>${App.both(g.title, g.he_title)}</span><span class="small muted">${g.items.length}${g.local ? "" : " · not downloaded"}</span></h4>
+    if (this.commFilter) { const f = groups.filter(g => g.title === this.commFilter || g.title.startsWith(this.commFilter + " on")); if (f.length) groups = f; }
+    el.innerHTML = `<div class="row"><b>${esc(p.ref)}</b> <span class="he-name">${esc(App.heRef(p.ref, this.tab().he_title, this.tab().title))}</span><span class="spacer"></span><span class="small">${this.fontPicker("comm_pane_font", "Font", "regular")}</span><button class="btn small" id="cLink">+ My link</button></div>` + (groups.length ? groups.map(g => `<div class="comm-group"><h4><span>${App.both(g.title, g.he_title)}</span><span class="small muted">${g.items.length}${g.local ? "" : " · not downloaded"}</span></h4>
       ${g.items.map(i => i.texts.length ? i.texts.map(x => `<div class="comm-item" data-ref="${esc(x.ref)}"><div class="small"><a href="#" data-open="${x.id}">${esc(x.ref)}</a> <span class="muted">${esc(i.type || "")}</span></div>${x.he ? `<div class="he">${esc(this.nk(x.he))}</div>` : ""}${x.en ? `<div class="en">${esc(x.en)}</div>` : ""}</div>`).join("")
         : `<div class="comm-item small muted">${esc(i.ref)} (${esc(i.type || "")})</div>`).join("")}</div>`).join("")
       : `<p class="muted small">No connections found. Download the cross-reference pack in Settings → Library, or add your own link.</p>`);
     $("#cLink", el).onclick = () => this.userLink(p);
+    el.style.setProperty("--comm-pane-font", this.fontCss(App.state.settings.comm_pane_font, "regular"));
+    $$("[data-fp]", el).forEach(sel => sel.onchange = async () => { await App.setSetting(sel.dataset.fp, sel.value); el.style.setProperty("--comm-pane-font", this.fontCss(sel.value, "regular")); });
     $$("[data-open]", el).forEach(a => a.onclick = async e => { e.preventDefault(); const r = await App.api("passage", { id: +a.dataset.open }); this.open(r.work_id, r.node, r.chapter, r.id, e.ctrlKey || App.state.settings.comm_new_tab); });
   },
+  /* ---------- Daf layout (like a Vilna Shas page) ----------
+     amud a: Rashi on the inner (right) side, Tosafos outer (left), Mesores HaShas in the right margin, Ein Mishpat /
+     Torah Ohr in the left margin. Amud b is the mirror image. Any commentary can be switched on or off; the later
+     commentaries (printed at the back of the volume) can be shown as links on the Gemara. */
   async drawDaf(t, cur) {
     const el = $("#rText");
-    el.innerHTML = `<p class="muted small" style="text-align:center">Building Daf layout…</p>`;
-    const side = {};
-    for (const p of (t.passages || []).slice(0, 80)) {
-      const gs = await App.api("connections", { ref: p.ref });
-      for (const g of gs) for (const i of g.items) for (const x of i.texts) (side[g.title] = side[g.title] || []).push(x);
+    el.innerHTML = `<p class="muted small" style="text-align:center">Building the daf…</p>`;
+    const ch = (cur && cur.chapter) || (t.passages[0] || {}).chapter || "";
+    const d = await App.api("daf", { work_id: t.work_id || t.id, node: (cur && cur.node) || (t.passages[0] || {}).node || "", chapter: ch });
+    if (this.tab() !== t || this.view.mode !== "daf") return;
+    this.dafData = d;
+    const MARG_IN = ["Mesorat HaShas"], MARG_OUT = ["Ein Mishpat Ner Mitzvah", "Torah Ohr", "Hagahot HaBach", "Gilyon HaShas"];
+    const on = this.dafOn = this.dafOn || { Rashi: true, Tosafot: true, "Mesorat HaShas": true, "Ein Mishpat Ner Mitzvah": true, "Torah Ohr": true, _links: true };
+    const amudB = /b$/.test(ch), dafNum = parseInt(ch);
+    const dh = s => { const m = (s || "").match(/^(.{2,70}?)(\s[-–]\s|[.:]\s)/); return m ? `<b>${esc(m[1])}</b>${esc(m[2])}${esc(s.slice(m[0].length))}` : esc(s); };
+    const C = name => d.commentaries.find(c => c.title === name);
+    const cspans = c => c ? c.passages.map(x => `<span class="cm" data-a="${esc(x.anchor)}" data-ref="${esc(x.ref)}">${dh(this.nk(x.he || x.en))} </span>`).join("") : "";
+    const head = c => `<div class="v-head">${esc(c.he_title)}</div>`;
+    const col = (name, cls) => { const c = C(name); return on[name] && c ? `<div class="v-side ${cls}">${head(c)}${cspans(c)}</div>` : `<div class="v-side v-empty ${cls}"></div>`; };
+    const marg = names => { const cs = names.map(C).filter(c => c && on[c.title]); return `<div class="v-marg">${cs.map(c => `<div class="v-mh">${esc(c.he_title)}</div>${c.passages.map(x => `<div class="cm" data-a="${esc(x.anchor)}" data-ref="${esc(x.ref)}">${esc(this.nk(x.he || x.en))}</div>`).join("")}`).join("")}</div>`; };
+    const placed = new Set(["Rashi", "Tosafot", ...MARG_IN, ...MARG_OUT]);
+    const later = d.commentaries.filter(c => !placed.has(c.title));          // printed at the back of the volume
+    const extras = later.filter(c => on[c.title]);
+    // links on the Gemara to the later commentaries (like the little letters that send you to the back of the volume)
+    const linkMap = {};
+    if (on._links) for (const c of later) for (const x of c.passages) (linkMap[x.anchor] = linkMap[x.anchor] || new Set()).add(c.title);
+    const abbr = c => (C(c).he_title || c).replace(/^(רבינו|ר׳|רבי)\s/, "").split(/\s/)[0].slice(0, 6);
+    const gem = t.passages.map((p, i) => { const seg = (p.verse || String(i + 1)).split(":")[0];
+      const lk = linkMap[seg] ? [...linkMap[seg]].map(c => `<sup class="v-link" data-lc="${esc(c)}" data-a="${esc(seg)}" title="${esc(c)}">${esc(abbr(c))}</sup>`).join("") : "";
+      return `<span class="gs" data-seg="${esc(seg)}" data-id="${p.id}" data-ref="${esc(p.ref)}">${i === 0 && dafNum === 2 && !amudB ? this.bigFirst(this.nk(p.he)) : esc(this.nk(p.he))}${lk} </span>`; }).join("");
+    el.innerHTML = `<div class="v-bar">
+        <span class="v-title he">${esc(d.he_title || d.title)} · דף ${App.heNum(dafNum)}${amudB ? ":" : "."}</span><span class="small muted">${esc(d.title)} ${esc(ch)}</span><span class="spacer"></span>
+        <span class="v-fonts small">${this.fontPicker("daf_gem_font", "Gemara", "Frank Ruhl Libre")}${this.fontPicker("daf_comm_font", "Rashi / Tosafos", "rashi")}
+          <select id="vSize" title="Size">${[80, 90, 100, 110, 125, 140].map(z => `<option value="${z}" ${String(App.state.settings.daf_size || 100) === String(z) ? "selected" : ""}>${z}%</option>`).join("")}</select></span>
+        <button class="btn small" id="vEdit" title="Change words on this page before printing (does not change the sefer)">✏️ Edit page</button>
+        <button class="btn small" id="vPrint">🖨 Print daf</button><button class="btn small" id="vPrintC">🖨 Print commentaries only</button></div>
+      <div class="v-chips">${d.commentaries.map(c => `<button class="chip ${on[c.title] ? "on" : ""}" data-cm="${esc(c.title)}" title="${esc(c.title)} · ${c.passages.length}">${esc(c.he_title)}</button>`).join("") || `<span class="small muted">No commentaries downloaded for this masechta</span>`}
+        ${later.length ? `<button class="chip ${on._links ? "on" : ""}" data-cm="_links" title="Marks on the Gemara that lead to the later commentaries (printed at the back of the volume)">🔗 Links to more commentaries</button>` : ""}
+        <button class="chip" id="vOnly" title="Show just one commentary at a time">☝ one at a time</button></div>
+      <div class="vilna ${amudB ? "amud-b" : "amud-a"}" id="vPage">
+        <div class="v-hdr"><span>${amudB ? `${App.heNum(dafNum)}` : esc(d.he_title || d.title)}</span><span>${amudB ? esc(d.he_title || d.title) : `${App.heNum(dafNum)}`}</span></div>
+        <div class="v-top">${amudB ? marg(MARG_OUT) + col("Tosafot", "v-tos") : marg(MARG_IN) + col("Rashi", "v-rashi")}<div class="v-gem">${gem}</div>${amudB ? col("Rashi", "v-rashi") + marg(MARG_IN) : col("Tosafot", "v-tos") + marg(MARG_OUT)}</div>
+        <div class="v-bottom">${amudB ? `<div class="v-more v-tos"></div><div class="v-more v-rashi"></div>` : `<div class="v-more v-rashi"></div><div class="v-more v-tos"></div>`}</div>
+      </div>
+      ${extras.length ? `<div class="vilna v-back" id="vBack"><div class="v-hdr"><span>מפרשים · ${esc(d.he_title)} ${App.heNum(dafNum)}${amudB ? ":" : "."}</span></div>${extras.map(c => `<div class="v-extra" data-ex="${esc(c.title)}"><div class="v-head">${esc(c.he_title)} <small class="muted">${esc(c.title)}</small></div><div class="v-cols">${cspans(c)}</div></div>`).join("")}</div>` : ""}`;
+    this.applyDafFonts(el);
+    $$("[data-fp]", el).forEach(sel => sel.onchange = async () => { await App.setSetting(sel.dataset.fp, sel.value); this.drawDaf(t, cur); });
+    $("#vSize", el).onchange = async e => { await App.setSetting("daf_size", e.target.value); this.drawDaf(t, cur); };
+    // Rashi and Tosafos run beside the Gemara; what does not fit continues underneath, like the printed page
+    const gemH = $(".v-gem", el).offsetHeight + 30;
+    for (const cls of ["v-rashi", "v-tos"]) {
+      const side = $(".v-top ." + cls, el), more = $(".v-bottom ." + cls, el);
+      if (!side || !more) continue;
+      const spans = $$(".cm", side);
+      while (side.offsetHeight > gemH && spans.length) more.prepend(spans.pop());
     }
-    const titles = Object.keys(side).sort((a, b) => side[b].length - side[a].length);
-    const col = name => name ? `<div class="daf-side"><div style="text-align:center;font-weight:700;color:var(--accent)">${esc(name)}</div>${side[name].map(x => `<span class="he" data-ref="${esc(x.ref)}">${esc(this.nk(x.he || x.en))} </span>`).join("")}</div>` : `<div class="daf-side muted small">No commentary downloaded for this ${esc(t.sections[0] || "page")}.</div>`;
-    el.innerHTML = `<div class="chapter-title">${esc(t.he_title || t.title)} · ${esc(this.chapterLabel(t, cur || {}))}</div>
-      <div class="daf-layout">${col(titles[0])}<div class="daf-main">${(t.passages || []).map(p => `<span class="he" data-ref="${esc(p.ref)}" data-id="${p.id}">${esc(this.nk(p.he))} </span>`).join("")}</div>${col(titles[1])}</div>
-      ${titles.slice(2).map(n => `<h2>${esc(n)}</h2>${side[n].map(x => `<p class="he" data-ref="${esc(x.ref)}" style="font-size:16px">${esc(this.nk(x.he || x.en))}</p>`).join("")}`).join("")}`;
+    $$("[data-cm]", el).forEach(b => b.onclick = () => { if (this._solo && b.dataset.cm !== "_links") { for (const k of Object.keys(on)) if (k !== "_links") on[k] = false; on[b.dataset.cm] = true; } else on[b.dataset.cm] = !on[b.dataset.cm]; this.drawDaf(t, cur); });
+    const solo = $("#vOnly", el); solo.classList.toggle("on", !!this._solo);
+    solo.onclick = () => { this._solo = !this._solo; if (this._solo) { const first = d.commentaries.find(c => on[c.title]); for (const k of Object.keys(on)) if (k !== "_links") on[k] = false; if (first) on[first.title] = true; } this.drawDaf(t, cur); };
+    const light = seg => { $$(".hl-on", el).forEach(x => x.classList.remove("hl-on")); $$(`.gs[data-seg="${seg}"], .cm[data-a="${seg}"]`, el).forEach(x => x.classList.add("hl-on")); };
+    $$(".gs", el).forEach(g => g.onclick = e => { if (this._editing || e.target.closest(".v-link")) return; light(g.dataset.seg); const c = $(`.cm[data-a="${g.dataset.seg}"]`, el); if (c) c.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
+    $$(".cm", el).forEach(c => c.onclick = () => { if (this._editing) return; light(c.dataset.a); const g = $(`.gs[data-seg="${c.dataset.a}"]`, el); if (g) g.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
+    $$(".v-link", el).forEach(l => l.onclick = e => { e.stopPropagation(); const c = C(l.dataset.lc); const xs = c.passages.filter(x => x.anchor === l.dataset.a);
+      App.modal(`<h3>${esc(c.he_title)} <small class="muted">${esc(c.title)}</small></h3><div style="max-height:60vh;overflow:auto">${xs.map(x => `<p class="he" style="font-size:19px;line-height:1.7">${dh(this.nk(x.he || x.en))}</p><div class="small muted">${esc(x.ref)}</div>`).join("")}</div>
+        <div class="row" style="justify-content:flex-end"><button class="btn" id="vShowAll">Show ${esc(c.he_title)} on the page</button><button class="btn primary" data-close>Close</button></div>`, m => {
+        $("#vShowAll", m).onclick = () => { on[c.title] = true; App.closeModal(); this.drawDaf(t, cur); }; }); });
+    $("#vEdit", el).onclick = () => { this._editing = !this._editing; $$("#vPage, #vBack", el).forEach(x => x.contentEditable = this._editing); $("#vEdit", el).classList.toggle("primary", this._editing);
+      App.toast(this._editing ? "Edit the page, then print. (The sefer itself is not changed.)" : "Editing off"); };
+    $("#vPrint", el).onclick = () => this.printHtml(`${$("#vPage", el).outerHTML}${$("#vBack", el) ? $("#vBack", el).outerHTML : ""}`, `${d.title} ${ch}`);
+    $("#vPrintC", el).onclick = () => {
+      const shown = d.commentaries.filter(c => on[c.title]);
+      if (!shown.length) return App.toast("Switch on at least one commentary", true);
+      // printed as it is on the screen (including your edits)
+      const html = shown.map(c => { const nodes = $$(`#vPage .cm, #vBack .cm`, el).filter(x => (x.dataset.ref || "").startsWith(c.title + " on") || (x.closest("[data-ex]") || {}).dataset?.ex === c.title);
+        return `<div class="v-extra"><div class="v-head">${esc(c.he_title)}</div><div class="v-cols">${nodes.map(n => n.innerHTML).join(" ") || cspans(c)}</div></div>`; }).join("");
+      this.printHtml(`<div class="vilna"><div class="v-hdr"><span>${esc(d.he_title)} ${App.heNum(dafNum)}${amudB ? ":" : "."}</span></div>${html}</div>`, `${d.title} ${ch} - commentaries`);
+    };
+  },
+  /* font choices: Rashi script or a regular (square) font, or any installed font */
+  fontPicker(key, label, def) {
+    const cur = App.state.settings[key] || def;
+    const fams = (App.state.fonts || []).filter(f => !/^(Noto Rashi Hebrew)$/.test(f));
+    return `<label title="${esc(label)} font">${esc(label)} <select data-fp="${key}">
+      <option value="rashi" ${cur === "rashi" ? "selected" : ""}>כתב רש״י (Rashi script)</option>
+      <option value="regular" ${cur === "regular" ? "selected" : ""}>Regular (square letters)</option>
+      ${fams.map(f => `<option value="${esc(f)}" ${cur === f ? "selected" : ""} style="font-family:'${esc(f)}'">${esc(f)}</option>`).join("")}</select></label>`;
+  },
+  fontCss(v, def) {
+    v = v || def;
+    if (v === "rashi") return `"Noto Rashi Hebrew", "Guttman Rashi", var(--he-font)`;
+    if (v === "regular") return `var(--he-font)`;
+    return `"${v}", var(--he-font)`;
+  },
+  applyDafFonts(el) {
+    const st = App.state.settings, z = (+st.daf_size || 100) / 100;
+    const page = $("#vPage", el); if (!page) return;
+    for (const x of [page, $("#vBack", el)].filter(Boolean)) {
+      x.style.setProperty("--gem-font", this.fontCss(st.daf_gem_font, "Frank Ruhl Libre"));
+      x.style.setProperty("--comm-font", this.fontCss(st.daf_comm_font, "rashi"));
+      x.style.setProperty("--daf-zoom", z);
+    }
+  },
+  bigFirst(s) { const m = (s || "").match(/^(\S+)\s?([\s\S]*)$/); return m ? `<span class="v-first">${esc(m[1])}</span> ${esc(m[2])}` : esc(s); },
+  /* print just this html with the page styles (in a hidden frame) */
+  printHtml(html, title) {
+    const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0"; document.body.appendChild(f);
+    const css = [...document.querySelectorAll("style, link[rel=stylesheet]")].map(x => x.outerHTML).join("");
+    f.contentDocument.open();
+    f.contentDocument.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>body{background:#fff!important;color:#000;margin:0;padding:10mm}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}</style></head><body>${html}</body></html>`);
+    f.contentDocument.close();
+    setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }, 600);
   },
   find(q) {
     $$(".psg").forEach(p => p.style.display = "");

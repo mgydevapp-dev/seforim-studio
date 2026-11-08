@@ -6,6 +6,33 @@ const Settings = {
     this.tab("library");
   },
   tab(t) { if (!$("#stTabs")) App.show("settings"); $$("#stTabs button").forEach(b => b.classList.toggle("active", b.dataset.t === t)); return this["t_" + t]($("#stBody")); },
+  async drawLocations() {
+    const L = await App.api("locations"), el = $("#stLoc"); if (!el) return;
+    el.innerHTML = `<table class="tbl"><tr><td><b>Seforim library</b></td><td><code>${esc(L.library)}</code></td></tr>
+      <tr><td><b>AI handwriting models</b></td><td><code>${esc(L.ai)}</code> ${L.ai_found ? "✅" : "— not installed"}</td></tr>
+      <tr><td><b>Your notes & settings</b></td><td><code>${esc(L.data)}</code></td></tr></table>
+      ${L.all_users ? `<p>✅ Installed for <b>all users</b>: the library and AI models are installed once in <code>${esc(L.shared)}</code> for everyone on this computer; each user has their own notes.</p>` : `<p class="muted">To install once for every user of this computer, run SeforimStudio-Setup.exe and tick “Install for ALL users”.</p>`}
+      <div class="grid g2" style="margin-top:8px">
+        <div><b>Use the AI models from a USB stick or another folder</b><p class="muted">No copying needed — the app runs them from there. (A USB stick with a <code>SeforimAI</code> folder is found automatically.)</p>
+          <div class="row"><input id="locAi" placeholder="e.g. E:\\SeforimAI" style="flex:1"><button class="btn" id="locAiGo">Use this folder</button></div>
+          <div class="row" style="margin-top:6px"><input id="locCopy" placeholder="Copy my AI models to… e.g. E:\\" style="flex:1"><button class="btn" id="locCopyGo">Copy to USB</button></div>
+          <div class="progress" style="margin-top:6px"><div id="locBar"></div></div><div id="locStat"></div></div>
+        <div><b>Use a library from a USB stick or another drive</b><p class="muted">Point to a folder that has <code>library.sqlite</code> (e.g. to keep the 11 GB library off drive C:).</p>
+          <div class="row"><input id="locLib" placeholder="e.g. D:\\SeforimLibrary" style="flex:1"><button class="btn" id="locLibGo">Use this library</button></div>
+          ${Object.keys(L.custom || {}).length ? `<button class="btn small" id="locReset" style="margin-top:6px">Back to the normal places</button>` : ""}</div></div>`;
+    const set = async a => { try { await App.api("locations", a); App.toast("Saved"); this.drawLocations(); Library.loadTree && Library.loadTree(); } catch (e) { App.toast(e.message, true); } };
+    $("#locAiGo").onclick = () => set({ ai: $("#locAi").value });
+    $("#locLibGo").onclick = () => set({ library: $("#locLib").value });
+    if ($("#locReset")) $("#locReset").onclick = () => set({ ai: "", library: "" });
+    $("#locCopyGo").onclick = async () => {
+      const f = $("#locCopy").value.trim(); if (!f) return App.toast("Type the USB stick, e.g. E:\\", true);
+      const use = await App.confirm("After copying, run the AI models from the USB stick? (OK = use them from the USB stick · Cancel = only make a copy)");
+      const { job } = await App.api("copy_ai", { folder: f, use });
+      const r = await App.job(job, s => { $("#locBar").style.width = (s.total ? 100 * s.progress / s.total : 2) + "%"; $("#locStat").textContent = s.label || ""; });
+      $("#locStat").textContent = r && r.folder ? "Copied to " + r.folder : "";
+      this.drawLocations();
+    };
+  },
   async t_library(el) {
     const st = await App.api("status"); App.state.status = st;
     const tree = (await App.api("catalog_tree")).tree;
@@ -27,7 +54,9 @@ const Settings = {
         <div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px">${rows.map(r => `<label class="row small" style="padding-left:${r.d * 22}px"><input type="checkbox" data-path="${esc(r.path)}"> ${esc(r.name)} <span class="he" style="font-size:14px">${esc(r.he || "")}</span><span class="muted">(${r.n})</span></label>`).join("")}</div>
         <div class="row small" style="margin-top:6px"><label><input type="checkbox" id="dlEn" checked> Include English translations</label><label><input type="checkbox" id="dlLinks"> Cross-references (commentary links, ~800 MB download)</label></div>
         <div class="row" style="margin-top:8px"><button class="btn primary" id="dlGo">⬇ Download & build library</button><button class="btn" id="dlStop">Stop</button></div>
-        <div class="progress" style="margin-top:8px"><div id="dlBar"></div></div><div class="small" id="dlStat"></div></div></div>`;
+        <div class="progress" style="margin-top:8px"><div id="dlBar"></div></div><div class="small" id="dlStat"></div></div>
+      <div class="card" style="grid-column:1/-1"><h2 style="margin-top:0">📍 Where the library and AI models are</h2><div id="stLoc" class="small">…</div></div></div>`;
+    this.drawLocations();
     $("#stCat").onclick = async () => { const u = await App.uploadPicked(".db,.sqlite,.sqlite3", false); if (!u.length) return; const r = await App.api("load_catalog", { upload: u[0].upload }); App.toast(`Catalog loaded: ${r.works} works`); Library.loadTree(); this.tab("library"); };
     App.api("he_coverage").then(c => { if (c.works) $("#stHe").innerHTML = `<b>${c.with_hebrew.toLocaleString()}</b> of ${c.works.toLocaleString()} seforim already show their Hebrew name (built-in dictionary${c.official ? ` + ${c.official.toLocaleString()} official titles` : ""}). The one-time download below makes every title exact and adds authors & dates.`; });
     $("#stInst").onclick = async () => {

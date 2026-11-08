@@ -49,25 +49,44 @@ def find_browser():
     return next((c for c in cands if c and os.path.exists(c)), None)
 
 
+def install_mode():
+    """install.json next to the exe (written by Setup) = installed for ALL users: the library, AI models and fonts are
+    in one shared folder (installed once), and every Windows user keeps their own notes and settings."""
+    f = os.path.join(HOME, "install.json")
+    try:
+        import json
+        return json.load(open(f, encoding="utf-8")) if os.path.exists(f) else {}
+    except Exception:
+        return {}
+
+
 def main():
+    mode = install_mode()
+    shared = mode.get("shared") if mode.get("mode") == "allusers" else None
+    default_data = (os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "SeforimStudio")
+                    if shared else os.path.join(HOME, "data"))
     # The .exe has no console window: send messages to a log file instead.
     if sys.stdout is None or sys.stderr is None:
-        os.makedirs(os.path.join(HOME, "data"), exist_ok=True)
-        log = open(os.path.join(HOME, "data", "app_log.txt"), "a", encoding="utf-8", buffering=1)
+        os.makedirs(default_data, exist_ok=True)
+        log = open(os.path.join(default_data, "app_log.txt"), "a", encoding="utf-8", buffering=1)
         sys.stdout = sys.stdout or log
         sys.stderr = sys.stderr or log
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=0)
-    ap.add_argument("--data", default=os.path.join(HOME, "data"))
+    ap.add_argument("--data", default=default_data)
+    ap.add_argument("--shared", default=shared, help="folder with the library / AI models shared by all users")
     ap.add_argument("--no-window", action="store_true")
     a = ap.parse_args()
     os.makedirs(a.data, exist_ok=True)
     # first run: ship the catalog next to the app
     bundled = os.path.join(BASE, "data", "seforim_catalog.db")
-    target = os.path.join(a.data, "seforim_catalog.db")
+    target = os.path.join(a.shared or a.data, "seforim_catalog.db")
     if os.path.exists(bundled) and not os.path.exists(target):
-        shutil.copy2(bundled, target)
-    app = App(BASE, a.data)
+        try:
+            shutil.copy2(bundled, target)
+        except OSError:
+            pass
+    app = App(BASE, a.data, a.shared)
     srv = serve(app, a.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
     print("Seforim Studio is running at", url)

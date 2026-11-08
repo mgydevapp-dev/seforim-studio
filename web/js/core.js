@@ -36,7 +36,9 @@ const App = {
   },
   async upload(file) {
     const r = await fetch("/upload", { method: "POST", headers: { "X-Token": TOKEN, "X-Filename": encodeURIComponent(file.name) }, body: file });
-    return r.json();
+    const j = await r.json();
+    try { if (/^image\//.test(file.type)) j.url = URL.createObjectURL(file); } catch (e) { }
+    return j;
   },
   fileUrl(u, download) { if (!u) return u; return u + (u.includes("?") ? "&" : "?") + "t=" + TOKEN + (download ? "&dl=1" : ""); },
   download(u) { const a = document.createElement("a"); a.href = this.fileUrl(u, true); a.download = ""; document.body.appendChild(a); a.click(); a.remove(); },

@@ -194,7 +194,7 @@ jobs:
       - name: Tools, fonts, text
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq tesseract-ocr culmus fonts-noto-core > /dev/null || sudo apt-get install -y -qq tesseract-ocr > /dev/null
-          pip install -q pillow numpy
+          pip install -q pillow numpy python-bidi
           mkdir -p work/fonts work/tessdata && cd work
           curl -fsSL -o tessdata/heb.traineddata https://github.com/tesseract-ocr/tessdata_best/raw/main/heb.traineddata
           curl -fsSL -o heb.txt https://raw.githubusercontent.com/tesseract-ocr/langdata_lstm/main/heb/heb.training_text
@@ -203,11 +203,13 @@ jobs:
           git clone -q --depth 1 https://github.com/tesseract-ocr/tesstrain.git
           find f1 f2 /usr/share/fonts -type f -iregex '.*\(ktav\|yad\|gveret\|levin\|dana\|anka\|refoyl\|nachlaot\|shmulik\|ellinia.*it\|dorian.*it\).*\.\(ttf\|otf\)' | sort -u > fontlist.txt
           cat fontlist.txt
+          while IFS= read -r f; do cp "$f" "fonts/$(basename "$f" | tr ' ' _)"; done < fontlist.txt
+          ls fonts
       - name: Make 24,000 handwriting-style training lines
         run: |
           cd work
-          python ../tools/make_script_gt.py --fonts $(head -40 fontlist.txt) --corpus heb.txt --out tesstrain/data/heb_script-ground-truth --lines 24000
-          python ../tools/make_script_gt.py --fonts $(head -40 fontlist.txt) --corpus heb.txt --out heldout --lines 300 --seed 99
+          python ../tools/make_script_gt.py --fonts fonts/* --corpus heb.txt --out tesstrain/data/heb_script-ground-truth --lines 24000
+          python ../tools/make_script_gt.py --fonts fonts/* --corpus heb.txt --out heldout --lines 300 --seed 99
       - name: Train (fine-tune the Hebrew model on cursive)
         run: |
           cd work/tesstrain
