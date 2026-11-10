@@ -462,7 +462,7 @@ const Library = {
         $("#vShowAll", m).onclick = () => { on[c.title] = true; App.closeModal(); this.drawDaf(t, cur); }; }); });
     $("#vEdit", el).onclick = () => { this._editing = !this._editing; $$("#vPage, #vBack", el).forEach(x => x.contentEditable = this._editing); $("#vEdit", el).classList.toggle("primary", this._editing);
       App.toast(this._editing ? "Edit the page, then print. (The sefer itself is not changed.)" : "Editing off"); };
-    $("#vPrint", el).onclick = () => this.printHtml(`${$("#vPage", el).outerHTML}${$("#vBack", el) ? $("#vBack", el).outerHTML : ""}`, `${d.title} ${ch}`);
+    $("#vPrint", el).onclick = () => this.printHtml(`${$("#vPage", el).outerHTML}${$(".v-trans", el) ? $(".v-trans", el).outerHTML : ""}${$("#vBack", el) ? $("#vBack", el).outerHTML : ""}`, `${d.title} ${ch}`);
     $("#vPrintC", el).onclick = () => {
       const shown = d.commentaries.filter(c => on[c.title]);
       if (!shown.length) return App.toast("Switch on at least one commentary", true);
@@ -502,7 +502,7 @@ const Library = {
     const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0"; document.body.appendChild(f);
     const css = [...document.querySelectorAll("style, link[rel=stylesheet]")].map(x => x.outerHTML).join("");
     f.contentDocument.open();
-    f.contentDocument.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>body{background:#fff!important;color:#000;margin:0;padding:10mm}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}@media print{body *{visibility:visible!important}}</style></head><body><div class="print-area" style="position:static">${html}</div></body></html>`);
+    f.contentDocument.write(`<!doctype html><html dir="rtl" style="${esc(document.documentElement.getAttribute("style") || "")}"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>html,body{width:auto}body{background:#fff!important;color:#000;margin:0;padding:6mm;min-width:900px}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}@media print{body *{visibility:visible!important}}</style></head><body><div class="print-area" style="position:static">${html}</div></body></html>`);
     f.contentDocument.close();
     setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }, 600);
   },
@@ -576,7 +576,13 @@ const Library = {
       };
     });
   },
-  print() { const el = $("#rText"); el.classList.add("print-area"); window.print(); setTimeout(() => el.classList.remove("print-area"), 500); },
+  print() {
+    // print exactly what is on the screen: in Daf layout the Vilna page with the commentaries that are switched on
+    if (this.view.mode === "daf" && $("#vPage")) {
+      return this.printHtml(`${$("#vPage").outerHTML}${$(".v-trans") ? $(".v-trans").outerHTML : ""}${$("#vBack") ? $("#vBack").outerHTML : ""}`, document.title);
+    }
+    const el = $("#rText"); el.classList.add("print-area"); window.print(); setTimeout(() => el.classList.remove("print-area"), 500);
+  },
   logReading() {
     if (App.current !== "library" || !this.readStart || document.hidden) return;
     const secs = Math.round((Date.now() - this.readStart) / 1000);
