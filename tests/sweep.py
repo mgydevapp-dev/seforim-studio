@@ -38,6 +38,7 @@ def wait_job(j):
         if r.get("done"): return r
         time.sleep(0.3)
 
+api("setting", key="ask_save", value="0")  # no "Save as" boxes during the robot test
 BIG = bool(os.environ.get("SWEEP_DATA"))
 if not BIG:  # small sample library
     sample = tempfile.mkdtemp(prefix="sweep_sefaria_")
@@ -80,7 +81,10 @@ for nm, a in [("status", {}), ("catalog_tree", {}), ("lib_works", {}), ("library
               ("plugin_call", {"id": "word_study", "fn": "study", "args": {"word": "אור"}}),
               ("plugin_call", {"id": "tehillim", "fn": "for_name", "args": {"name": "משה", "mother": "שרה", "neshama": True, "age": "40"}}),
               ("plugin_call", {"id": "tehillim", "fn": "texts", "args": {"refs": ["Psalms 119:1-8", "Psalms 20"]}}),
-              ("plugin_call", {"id": "tehillim", "fn": "occasions"})]:
+              ("plugin_call", {"id": "tehillim", "fn": "occasions"}),
+              ("translate", {"q": "שלום"}), ("translate", {"q": "peace"}), ("translate", {"q": "בראשית ברא אלהים"}),
+              ("interlinear", {"refs": ["Genesis 1:1"], "texts": ["בראשית ברא"]}), ("locations", {}),
+              ("plugin_call", {"id": "mitzvos", "fn": "list"}), ("plugin_call", {"id": "mitzvos", "fn": "detail", "args": {"kind": "rabbanan", "n": 1}})]:
     timed(nm, **a)
 g = timed("find_ref", ref="Genesis 1:1")
 if g and g.get("work_id"):
@@ -130,7 +134,7 @@ for t in tools:
 from playwright.sync_api import sync_playwright
 SKIP = re.compile(r"delete|remove|reset|clear all|stop|quit|exit|wipe|erase|uninstall|install fonts into windows|make the complete zip|"
                   r"bluetooth|load a different|print|open folder|log ?out|forget|restore|download|install|close app|install library|"
-                  r"⬇|📥|🗑|×|✕", re.I)
+                  r"⬇|📥|🗑|×|✕|choose|📂|🖨", re.I)
 with sync_playwright() as p:
     b = p.chromium.launch(channel="msedge") if os.name == "nt" else p.chromium.launch(); pg = b.new_page(viewport={"width": 1400, "height": 900})
     pg.set_default_timeout(60000)

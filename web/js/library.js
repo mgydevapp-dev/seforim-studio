@@ -17,7 +17,9 @@ const Library = {
         <div class="reader-toolbar" id="rTool">
           <button class="btn small" id="rPrev" title="Previous chapter (←)">‹ Prev</button><button class="btn small" id="rNext" title="Next chapter (→)">Next ›</button>
           <select id="rMode" title="Layout"><option value="side">Hebrew | English</option><option value="stacked">Stacked</option><option value="he">Hebrew only</option><option value="en">English only</option><option value="daf">Daf layout</option></select>
-          <select id="rNikud" title="Vowels"><option value="full">Nikud + ta'amim</option><option value="nikud">Nikud only</option><option value="none">No nikud</option></select>
+          <select id="rNikud" title="Vowels (nikud) and cantillation (trop)"><option value="full">Nikud + trop</option><option value="nikud">Nikud only</option><option value="taamim">Trop only</option><option value="none">No nikud, no trop</option></select>
+          <select id="rTr" title="Translation"><option value="full">Translation: explanatory</option><option value="basic">Translation: basic (word for word)</option><option value="inter">Interlinear (word under word)</option></select>
+          <select id="rPunct" title="Punctuation"><option value="asis">Punctuation as written</option><option value="add">Add punctuation (from the trop)</option><option value="remove">No punctuation marks</option></select>
           <button class="btn small" id="rSmall" title="Smaller text">A−</button><button class="btn small" id="rBig" title="Bigger text">A+</button>
           <label class="small" title="Text margins">↔ <input type="range" id="rMargin" min="0" max="220" style="width:80px"></label>
           <label class="small"><input type="checkbox" id="rInf"> Infinite scroll</label>
@@ -43,6 +45,10 @@ const Library = {
     $("#rMargin", el).value = App.state.settings.read_margin ?? 48;
     $("#rMode", el).onchange = e => { v.mode = e.target.value; this.saveView(); this.redraw(); };
     $("#rNikud", el).onchange = e => { v.nikud = e.target.value; this.saveView(); this.redraw(); };
+    $("#rTr", el).value = v.tr || "full";
+    $("#rTr", el).onchange = e => { v.tr = e.target.value; this.saveView(); this.redraw(); };
+    $("#rPunct", el).value = v.punct || "asis";
+    $("#rPunct", el).onchange = e => { v.punct = e.target.value; this.saveView(); this.redraw(); };
     $("#rComm", el).onchange = e => { v.comm = e.target.checked; this.saveView(); this.layoutPanes(); };
     $("#rSync", el).onchange = e => { v.sync = e.target.checked; this.saveView(); };
     $("#rInf", el).onchange = e => { v.infinite = e.target.checked; this.saveView(); const t = this.tab(); if (t) this.loadChapter(); };
@@ -103,7 +109,7 @@ const Library = {
         ${h.more_n ? "" : `<br>➕ For <b>thousands more seforim</b> (Otzaria: Dicta, Torat Emet, Wikisource…) also download the <code>SeforimMore.sqlite.xz.part…</code> files — they are added automatically.`}</div>
       <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="btn small primary" id="lhFind">Install now</button>
-        <input id="lhDir" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
+        <input id="lhDir" data-pick="folder" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
         <button class="btn small" id="lhNet" title="Needs internet (about 4 GB, roughly an hour)">Download missing from the internet</button>
       </div>`}
     </details>`;
@@ -241,13 +247,33 @@ const Library = {
     $$(".ti", el).forEach(x => x.onclick = () => { const c = t.toc[+x.dataset.i]; t.node = c.node; t.chapter = c.chapter; this.drawTabs(); this.loadChapter(); App.saveSession(); });
     const cur = $(".ti.cur", el); if (cur) cur.scrollIntoView({ block: "nearest" });
   },
-  nk(s) { if (!s) return ""; if (this.view.nikud === "none") return s.replace(NIKUD_ALL, ""); if (this.view.nikud === "nikud") return s.replace(TAAMIM, ""); return s; },
+  nk(s) {
+    if (!s) return "";
+    const pu = this.view.punct || "asis";
+    if (pu === "add") {
+      // the trop is the original punctuation: sof pasuk = full stop, etnachta / zakef / segolta = comma
+      s = s.split(/(\s+)/).map(w => {
+        if (/^\s+$/.test(w) || !w) return w;
+        if (/\u05C3/.test(w)) return w.replace(/\u05C3/g, "") + ".";
+        if (/[\u0591\u0592\u0594\u0595]/.test(w) && !/[.,;:]$/.test(w)) return w + ",";
+        return w;
+      }).join("");
+    }
+    if (pu === "remove") s = s.replace(/[\u05C3\u05C0\u05C6.,:;!?"'״׳()\[\]{}–—]/g, "").replace(/\u05BE/g, " ");
+    const n = this.view.nikud;
+    if (n === "none") s = s.replace(NIKUD_ALL, "").replace(/[\u05C0\u05C3\u05C6]/g, pu === "add" ? "" : "");
+    else if (n === "nikud") s = s.replace(TAAMIM, "");
+    else if (n === "taamim") s = s.replace(VOWELS, "");
+    return s;
+  },
   psgHtml(p, t) {
     const a = (t.ann || {})[p.id] || { notes: [], highlights: [], tags: [] };
     const hl = a.highlights[0] ? "hl-" + a.highlights[0].color : "";
     const m = this.view.mode; const cls = m === "he" ? "he-only" : m === "en" ? "en-only" : m === "stacked" ? "stacked" : "";
     const he = (m !== "en" && p.he) ? `<div class="he">${esc(this.nk(p.he))}</div>` : (m === "side" ? "<div></div>" : "");
-    const en = (m !== "he" && p.en) ? `<div class="en">${esc(p.en)}</div>` : "";
+    const enText = this.view.tr === "basic" && p.en_basic ? p.en_basic : p.en;
+    const en = (m !== "he" && enText) ? `<div class="en">${esc(enText)}</div>` : "";
+    if (this.view.tr === "inter" && p.he) return `<div class="psg inter ${hl}" data-id="${p.id}" data-ref="${esc(p.ref)}"><div class="vnum">${esc(p.verse || "")}</div><div class="inter-words" data-inter="${esc(p.ref)}">${esc(this.nk(p.he))}</div>${en}</div>`;
     const nl = (t.links || {})[p.id];
     return `<div class="psg ${cls} ${hl}" data-id="${p.id}" data-ref="${esc(p.ref)}">
       <span class="vnum">${esc(/^\d+$/.test(p.verse) ? App.heNum(+p.verse) : p.verse)}</span>
@@ -275,8 +301,18 @@ const Library = {
     el.innerHTML = `<div class="comm-bar" id="rChips"></div>` + html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
     $("#rNext2").onclick = () => this.step(1);
     this.drawCommChips(t, cur);
+    if (this.view.tr === "inter") this.fillInter(el);
     this.bindPassages(el, t);
     if (this.selected) { const s = $(`.psg[data-id="${this.selected}"]`, el); if (s) s.classList.add("sel"); }
+  },
+  /* interlinear: every Hebrew word with its English meaning under it */
+  async fillInter(el) {
+    const boxes = $$("[data-inter]", el); if (!boxes.length) return;
+    const r = await App.api("interlinear", { refs: boxes.map(b => b.dataset.inter), texts: boxes.map(b => b.textContent) }).catch(() => null);
+    if (!r) return;
+    boxes.forEach((b, i) => { const ws = r.verses[i] || []; if (!ws.length) return;
+      b.innerHTML = ws.map(w => `<span class="iw" title="${esc(w.lemma || "")}${w.strong ? " · Strong's " + esc(w.strong) : ""}"><span class="iw-he">${esc(this.nk(w.w))}</span><span class="iw-en">${esc(w.g || "·")}</span></span>`).join(""); });
+    if (r.note) { const n = h(`<p class="small muted inter-note">${esc(r.note)}</p>`); el.prepend(n); }
   },
   /* buttons for every commentary on this chapter / daf: click one to read it beside the text */
   async drawCommChips(t, cur) {
@@ -328,10 +364,29 @@ const Library = {
     let groups = await App.api("connections", { ref: p.ref });
     if (this.selected !== p.id) return;
     if (this.commFilter) { const f = groups.filter(g => g.title === this.commFilter || g.title.startsWith(this.commFilter + " on")); if (f.length) groups = f; }
-    el.innerHTML = `<div class="row"><b>${esc(p.ref)}</b> <span class="he-name">${esc(App.heRef(p.ref, this.tab().he_title, this.tab().title))}</span><span class="spacer"></span><span class="small">${this.fontPicker("comm_pane_font", "Font", "regular")}</span><button class="btn small" id="cLink">+ My link</button></div>` + (groups.length ? groups.map(g => `<div class="comm-group"><h4><span>${App.both(g.title, g.he_title)}</span><span class="small muted">${g.items.length}${g.local ? "" : " · not downloaded"}</span></h4>
-      ${g.items.map(i => i.texts.length ? i.texts.map(x => `<div class="comm-item" data-ref="${esc(x.ref)}"><div class="small"><a href="#" data-open="${x.id}">${esc(x.ref)}</a> <span class="muted">${esc(i.type || "")}</span></div>${x.he ? `<div class="he">${esc(this.nk(x.he))}</div>` : ""}${x.en ? `<div class="en">${esc(x.en)}</div>` : ""}</div>`).join("")
-        : `<div class="comm-item small muted">${esc(i.ref)} (${esc(i.type || "")})</div>`).join("")}</div>`).join("")
-      : `<p class="muted small">No connections found. Download the cross-reference pack in Settings → Library, or add your own link.</p>`);
+    const st = App.state.settings, showEn = st.comm_en !== "0", open = this.commOpen = this.commOpen || {};
+    const local = groups.filter(g => g.local), missing = groups.filter(g => !g.local);
+    const cat = g => { const c = (g.items[0] || {}).cat || ""; return c || "Other"; };
+    const cats = [...new Set(local.map(cat))];
+    el.innerHTML = `<div class="comm-head"><div><b>${esc(p.ref)}</b> <span class="he-name">${esc(App.heRef(p.ref, this.tab().he_title, this.tab().title))}</span></div>
+        <div class="row small" style="gap:6px;flex-wrap:wrap">
+          <label class="tgl"><input type="checkbox" id="cEn" ${showEn ? "checked" : ""}> Translation</label>
+          ${this.fontPicker("comm_pane_font", "Font", "regular")}
+          <button class="btn small" id="cAll">${Object.values(open).some(v => v === false) ? "Open all" : "Close all"}</button>
+          <button class="btn small" id="cPrint" title="Print these commentaries">🖨</button><button class="btn small" id="cLink">+ My link</button></div>
+        ${cats.length > 1 ? `<div class="comm-cats">${["All", ...cats].map(c => `<button class="chip ${(this.commCat || "All") === c ? "on" : ""}" data-cc="${esc(c)}">${esc(c)}</button>`).join("")}</div>` : ""}</div>
+      <div id="cBody">` + (local.length ? local.filter(g => !this.commCat || this.commCat === "All" || cat(g) === this.commCat).map(g => {
+        const n = g.items.reduce((k, i) => k + i.texts.length, 0);
+        return `<details class="comm-group" data-g="${esc(g.title)}" ${open[g.title] === false ? "" : "open"}><summary><span class="cg-he">${esc(g.he_title && g.he_title !== g.title ? g.he_title : "")}</span> <span class="cg-en">${esc(g.title)}</span><span class="spacer"></span><span class="badge">${n}</span></summary>
+        ${g.items.filter(i => i.texts.length).map(i => i.texts.map(x => `<div class="comm-item" data-ref="${esc(x.ref)}">${x.he ? `<div class="he">${esc(this.nk(x.he))}</div>` : ""}${x.en && showEn ? `<div class="en">${esc(x.en)}</div>` : ""}
+          <div class="small comm-ref"><a href="#" data-open="${x.id}">${esc(x.ref)} ›</a></div></div>`).join("")).join("")}</details>`; }).join("")
+      : `<p class="muted small">No commentaries found for this passage.</p>`)
+      + (missing.length ? `<details class="comm-missing"><summary class="small muted">${missing.length} more not in your library</summary><div class="small muted">${missing.map(g => esc(g.title)).join(" · ")}</div><p class="small">Get them: Library → “get the rest”, or Settings → Library.</p></details>` : "") + `</div>`;
+    $("#cEn", el).onchange = async e => { await App.setSetting("comm_en", e.target.checked ? "1" : "0"); this.loadConnections(p); };
+    $$("[data-cc]", el).forEach(b => b.onclick = () => { this.commCat = b.dataset.cc; this.loadConnections(p); });
+    $$("details.comm-group", el).forEach(d => d.ontoggle = () => { open[d.dataset.g] = d.open; });
+    $("#cAll", el).onclick = () => { const anyClosed = $$("details.comm-group", el).some(d => !d.open); $$("details.comm-group", el).forEach(d => { d.open = anyClosed; open[d.dataset.g] = anyClosed; }); $("#cAll", el).textContent = anyClosed ? "Close all" : "Open all"; };
+    $("#cPrint", el).onclick = () => this.printHtml(`<h2>${esc(p.ref)}</h2>` + $$("details.comm-group", el).filter(d => d.open).map(d => `<h3>${d.querySelector("summary").innerText}</h3>` + $$(".comm-item", d).map(x => x.outerHTML).join("")).join(""), p.ref + " - commentaries");
     $("#cLink", el).onclick = () => this.userLink(p);
     el.style.setProperty("--comm-pane-font", this.fontCss(App.state.settings.comm_pane_font, "regular"));
     $$("[data-fp]", el).forEach(sel => sel.onchange = async () => { await App.setSetting(sel.dataset.fp, sel.value); el.style.setProperty("--comm-pane-font", this.fontCss(sel.value, "regular")); });
@@ -445,7 +500,7 @@ const Library = {
     const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0"; document.body.appendChild(f);
     const css = [...document.querySelectorAll("style, link[rel=stylesheet]")].map(x => x.outerHTML).join("");
     f.contentDocument.open();
-    f.contentDocument.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>body{background:#fff!important;color:#000;margin:0;padding:10mm}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}</style></head><body>${html}</body></html>`);
+    f.contentDocument.write(`<!doctype html><html dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>body{background:#fff!important;color:#000;margin:0;padding:10mm}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}@media print{body *{visibility:visible!important}}</style></head><body><div class="print-area" style="position:static">${html}</div></body></html>`);
     f.contentDocument.close();
     setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }, 600);
   },

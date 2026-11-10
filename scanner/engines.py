@@ -29,7 +29,22 @@ except ImportError:  # running scanner/engines.py on its own
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from core import winproc
 
-OLLAMA_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+def _ollama_url():
+    h = (os.environ.get("OLLAMA_HOST") or "").strip()
+    if not h or h.startswith("0.0.0.0") or h.startswith("[::]"):
+        return "http://127.0.0.1:11434"
+    if not h.startswith("http"):
+        h = "http://" + h
+    if h.count(":") < 2:
+        h += ":11434"
+    return h.rstrip("/")
+
+
+OLLAMA_URL = _ollama_url()
+# Talk to the AI on this computer directly - never through a proxy / internet filter (e.g. NetFree), which breaks
+# local addresses and gives "https" / certificate errors.
+_LOCAL = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+AI_DEBUG = os.environ.get("SEFORIM_AI_DEBUG")
 if not OLLAMA_URL.startswith("http"):
     OLLAMA_URL = "http://" + OLLAMA_URL
 VISION_HINTS = ("vl", "vision", "llava", "gemma3", "minicpm-v", "moondream", "llama4", "mistral-small3", "granite3.2-vision")
@@ -131,8 +146,48 @@ class OllamaEngine:
         self.model = model
 
     def _get(self, path, timeout=3):
-        with urllib.request.urlopen(self.url + path, timeout=timeout) as r:
+        with _LOCAL.open(self.url + path, timeout=timeout) as r:
             return json.loads(r.read())
+
+    def _post(self, path, body):
+        req = urllib.request.Request(self.url + path, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        with _LOCAL.open(req, timeout=self.timeout) as r:
+            return json.loads(r.read())
+
+    def _ask(self, body):
+        """Ask the AI; copes with Ollama versions with/without the "think" switch and with thinking models."""
+        def text_of(out):
+            msg = out.get("message") or {}
+            c = msg.get("content") if msg else out.get("response", "")
+            c = c or ""
+            if "</think>" in c:
+                c = c.split("</think>", 1)[1]
+            return c.strip(), (msg.get("thinking") or out.get("thinking") or "")
+        tries = [("chat", body)]
+        b2 = dict(body)
+        b2.pop("think", None)
+        b2["messages"] = [dict(body["messages"][0], content="/no_think\n" + body["messages"][0]["content"])]
+        tries.append(("chat", b2))
+        g = {"model": body["model"], "stream": False, "think": False, "keep_alive": body.get("keep_alive"), "options": body["options"],
+             "prompt": body["messages"][0]["content"], "images": body["messages"][0]["images"]}
+        tries.append(("generate", g))
+        last = ""
+        for kind, b in tries:
+            try:
+                out = self._post("/api/" + kind, b)
+            except urllib.error.HTTPError as e:
+                last = f"{kind}: HTTP {e.code} {e.read()[:300]!r}"
+                continue
+            c, thinking = text_of(out)
+            if AI_DEBUG:
+                with open(AI_DEBUG, "a", encoding="utf-8") as f:
+                    f.write(f"--- {kind} keys={list(out)} done_reason={out.get('done_reason')} eval_count={out.get('eval_count')} "
+                            f"prompt_eval_count={out.get('prompt_eval_count')} content={c[:300]!r} thinking={thinking[:300]!r}\n")
+            if c:
+                return c
+            last = f"{kind}: empty answer (done_reason={out.get('done_reason')}, thinking {len(thinking)} chars)"
+        print("AI gave no text:", last, flush=True)
+        raise RuntimeError("The AI gave no text for this page (" + last + "). Try 'Unclear / messy' or the Tesseract reader.")
 
     def models(self):
         try:
@@ -183,24 +238,7 @@ class OllamaEngine:
                                   f"\n(This is part {i + 1} of {len(parts)} of a page; transcribe only what is visible.)"),
                                   "images": [_to_png_b64(part)]}]}
             req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                    out = json.loads(r.read())
-            except urllib.error.HTTPError as e:  # an older Ollama that does not know "think"
-                if e.code != 400:
-                    raise
-                body.pop("think", None)
-                body["messages"][0]["content"] = "/no_think\n" + body["messages"][0]["content"]
-                req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=self.timeout) as r:
-                    out = json.loads(r.read())
-            msg = out.get("message", {}) or {}
-            content = msg.get("content", "") or ""
-            # a "thinking" model may put its answer after </think> or only in the thinking part
-            if "</think>" in content:
-                content = content.split("</think>", 1)[1]
-            if not content.strip() and msg.get("thinking"):
-                print("AI gave no answer, only thinking:", len(msg["thinking"]), "chars", flush=True)
+            content = self._ask(body)
             texts.append(clean_transcription(content))
         return merge_strips(texts)
 
@@ -313,26 +351,32 @@ class TesseractEngine:
             # print model and the cursive (כתב) model; page layouts: a block / columns / scattered letters.
             # Whatever reads as the most real Hebrew wins.
             td = []
-            langs = ["heb"]
+            have = (winproc.run([exe, "--list-langs"], timeout=20).stdout or "").split()
             if os.path.exists(_script_model()):
-                td = ["--tessdata-dir", _tessdata_with_script(exe)]
-                langs.append("heb_script")
-            elif "heb_script" in (winproc.run([exe, "--list-langs"], timeout=20).stdout or "").split():
-                langs.append("heb_script")
+                tdir = _tessdata_with_script(exe)
+                td = ["--tessdata-dir", tdir]
+                have = [f[:-12] for f in os.listdir(tdir) if f.endswith(".traineddata")]
+            # +eng: English words on the page (labels, names) are read as English instead of turning into Hebrew junk
+            plus = "+eng" if "eng" in have else ""
+            langs = ["heb" + plus] + (["heb_script" + plus] if "heb_script" in have else [])
             best, best_q = "", -1
             tries = [(l, psm) for l in langs for psm in ("6", "4", "11")]
             for k, (lang, psm) in enumerate(tries):
                 if cancel and cancel():
                     break
                 if progress:
-                    progress(k, len(tries), f"Reading ({'cursive' if lang == 'heb_script' else 'print'} model, layout {psm})")
+                    progress(k, len(tries), f"Reading ({'cursive' if lang.startswith('heb_script') else 'print'} model, layout {psm})")
                 r = winproc.run([exe, p, "stdout", *td, "-l", lang, "--psm", psm], timeout=300)
                 if r.returncode != 0 and not (r.stdout or "").strip():
                     if k == 0:
                         raise RuntimeError("Tesseract failed: " + (r.stderr or "").strip()[-300:])
                     continue
-                txt = clean_transcription(r.stdout)
+                txt = clean_transcription(re.sub("[\u200e\u200f\u202a-\u202e]", "", r.stdout))
                 q = text_quality(txt) * (1 + 0.02 * min(len(txt.split()), 20))  # prefer reading more of the page
+                if getattr(self, "kind", "") == "hand" and lang.startswith("heb_script"):
+                    q *= 1.15
+                elif getattr(self, "kind", "") == "print" and not lang.startswith("heb_script"):
+                    q *= 1.15
                 if q > best_q:
                     best, best_q = txt, q
         return strip_noise(best)
@@ -351,9 +395,10 @@ def _tessdata_with_script(exe):
     src = os.environ.get("TESSDATA_PREFIX") or ""
     cands = [os.path.join(os.path.dirname(exe), "tessdata"), src, os.path.join(src, "tessdata"),
              "/usr/share/tesseract-ocr/5/tessdata", "/usr/share/tesseract-ocr/4.00/tessdata", "/usr/local/share/tessdata"]
-    for name, from_ in (("heb.traineddata", None), ("heb_script.traineddata", _script_model()), ("osd.traineddata", None)):
+    for name, from_ in (("heb.traineddata", None), ("heb_script.traineddata", _script_model()), ("osd.traineddata", None),
+                        ("eng.traineddata", None)):
         t = os.path.join(d, name)
-        if os.path.exists(t):
+        if os.path.exists(t) and (not from_ or os.path.getsize(t) == os.path.getsize(from_)):
             continue
         f = from_ or next((os.path.join(c, name) for c in cands if c and os.path.exists(os.path.join(c, name))), None)
         if f:
@@ -376,7 +421,9 @@ def text_quality(text):
         letters = _HEB.findall(t)
         core = "".join(letters)
         junk = sum(1 for c in t if not (_HEB.match(c) or c in "\"'׳״-.,:;!?()[]0123456789\u05b0-\u05c7"))
-        if len(core) >= 2 and junk == 0:
+        if re.fullmatch(r"[A-Za-z][a-z]{1,}[.,:;!?]?", t):  # a normal English word
+            good += 1.0
+        elif len(core) >= 2 and junk == 0:
             good += 1.0 if (not KNOWN_WORDS or core in KNOWN_WORDS or core.lstrip("ובכלמהש") in KNOWN_WORDS) else 0.5
     return good / len(toks)
 

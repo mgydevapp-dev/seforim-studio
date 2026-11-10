@@ -661,7 +661,7 @@ class App:
         c = Counter()
         for r in res["results"]:
             c.update({base(w) for w in H.plain_words(r["he"])})
-        total = self.lib.q1("SELECT COUNT(*) n FROM passages WHERE he_plain != ''")["n"] or 1
+        total = self.lib.q1("SELECT COALESCE(SUM(n_passages),0) n FROM works")["n"] or 1
         scored = []
         for w, k in c.most_common(80):
             if len(w) < 2 or k < max(1, n * 0.05):
@@ -727,6 +727,108 @@ class App:
     def api_histogram(self, a):
         return {"categories": self.lib.category_histogram(a["q"], a.get("lang", "auto"), a.get("opts")),
                 "eras": self.lib.era_histogram(a["q"], a.get("lang", "auto"), a.get("opts"))}
+    # ------------------------------------------------------------------ native dialogs: choose folder / file, save as
+    def api_pick(self, a):
+        from . import dialogs
+        kind = a.get("kind", "folder")
+        if kind == "folder":
+            return {"path": dialogs.pick_folder(a.get("title") or "Choose a folder", a.get("start") or "")}
+        if kind == "file":
+            return {"path": dialogs.pick_file(a.get("title") or "Choose a file", a.get("start") or "", a.get("filters") or "All files|*.*")}
+        return {"path": dialogs.save_as(a.get("title") or "Save as", a.get("name") or "", a.get("start") or "")}
+
+    def api_save_as(self, a):
+        """Save one of the app's files where the user chooses (instead of always into Downloads)."""
+        from . import dialogs
+        from urllib.parse import unquote, urlparse
+        rel = unquote(urlparse(a["url"]).path)
+        if rel.startswith("/files/"):
+            rel = rel[7:]
+        src = os.path.abspath(os.path.join(self.data, *rel.split("/")))
+        if not src.startswith(os.path.abspath(self.data)) or not os.path.exists(src):
+            raise ValueError("File not found")
+        last = self.user.get_setting("last_save_dir") or os.path.join(os.path.expanduser("~"), "Documents")
+        dest = dialogs.save_as("Save as", a.get("name") or os.path.basename(src), last)
+        if not dest:
+            return {"saved": False}
+        shutil.copyfile(src, dest)
+        self.user.set_setting("last_save_dir", os.path.dirname(dest))
+        return {"saved": True, "path": dest}
+
+    def api_save_data(self, a):
+        """Save data made in the window (a picture, a CSV…) where the user chooses."""
+        import base64
+        from . import dialogs
+        last = self.user.get_setting("last_save_dir") or os.path.join(os.path.expanduser("~"), "Documents")
+        dest = dialogs.save_as("Save as", a.get("name") or "file", last)
+        if not dest:
+            return {"saved": False}
+        data = a["data"]
+        raw = base64.b64decode(data.split(",", 1)[1]) if data.startswith("data:") else data.encode("utf-8")
+        open(dest, "wb").write(raw)
+        self.user.set_setting("last_save_dir", os.path.dirname(dest))
+        return {"saved": True, "path": dest}
+
+    # ------------------------------------------------------------------ Translate (offline dictionary + the library)
+    @property
+    def lang(self):
+        if getattr(self, "_lang", None) is None:
+            from .langdata import LangData
+            self._lang = LangData([os.path.join(self.base, "langdata", "lang.sqlite"), os.path.join(self.shared, "lang.sqlite"),
+                                   os.path.join(os.path.dirname(self.base), "langdata", "lang.sqlite")])
+        return self._lang
+
+    def api_translate(self, a):
+        from .langdata import is_hebrew, key
+        q = (a.get("q") or "").strip()
+        if not q:
+            return {"dir": "", "entries": []}
+        out = {"q": q, "dictionary": self.lang.ok}
+        words = H.plain_words(q) if is_hebrew(q) else re.findall(r"[A-Za-z']+", q)
+        if is_hebrew(q):
+            out["dir"] = "he-en"
+            out["entries"] = self.lang.lookup_he(q) if len(words) <= 1 else []
+            out["word_by_word"] = [{"he": w, "en": self.lang.gloss(w)} for w in re.findall(r"[\u05D0-\u05EA\u0591-\u05C7'\"״׳]+", q)][:60] \
+                if len(words) > 1 else []
+            # how the seforim themselves translate it
+            try:
+                res = self.lib.search(q if len(words) <= 1 else f'"{" ".join(words)}"', "he", {}, None, 0, 6)
+                out["examples"] = [{"ref": r["ref"], "he": r["he"][:300], "en": (r.get("en") or "")[:300]} for r in res.get("results", []) if r.get("en")][:5]
+            except Exception:
+                out["examples"] = []
+        else:
+            out["dir"] = "en-he"
+            out["entries"] = self.lang.lookup_en(q)
+            try:
+                out["library"] = [x[0] for x in self.api_cross_lingual({"q": q})[:12]]
+            except Exception:
+                out["library"] = []
+            try:
+                res = self.lib.search(q, "en", {}, None, 0, 6)
+                out["examples"] = [{"ref": r["ref"], "he": r["he"][:300], "en": (r.get("en") or "")[:300]} for r in res.get("results", [])][:5]
+            except Exception:
+                out["examples"] = []
+        return out
+
+    def api_interlinear(self, a):
+        """Word under word: exact for Tanach (every word with its root), dictionary meanings for other seforim."""
+        verses, used_dict = [], False
+        texts = a.get("texts") or []
+        for i, ref in enumerate(a.get("refs") or []):
+            ws = self.lang.interlinear(ref) if self.lang.ok else []
+            if ws:
+                verses.append([{"w": w["w"], "g": w["g"], "strong": w["strong"]} for w in ws])
+                continue
+            words = re.findall(r"\S+", texts[i] if i < len(texts) else "")
+            used_dict = True
+            verses.append([{"w": w, "g": self.lang.gloss(w) if self.lang.ok else ""} for w in words])
+        note = ""
+        if not self.lang.ok:
+            note = "The dictionary is not installed in this version."
+        elif used_dict:
+            note = "Word-by-word dictionary meanings (a help for reading, not an exact translation)."
+        return {"verses": verses, "note": note}
+
     def api_daf(self, a):
         """One amud laid out like the Vilna Shas: the Gemara, and every commentary on this tractate for this daf
         (Rashi, Tosafos, Rabbeinu Chananel, Maharsha, Ein Mishpat …), each piece tagged with the Gemara line it explains."""
@@ -1171,6 +1273,7 @@ class App:
                 if progress:
                     progress(i, len(pages), f"Page {i + 1}/{len(pages)} — {eng.name}")
                 hard = a.get("quality") == "hard"
+                eng.kind = a.get("kind") or ""
                 n_strips = int(strips) if strips else (3 if hard and eng.key == "ollama" else None)
                 try:
                     if hard and eng.key != "ollama":

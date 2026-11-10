@@ -14,11 +14,11 @@ const Settings = {
       ${L.all_users ? `<p>✅ Installed for <b>all users</b>: the library and AI models are installed once in <code>${esc(L.shared)}</code> for everyone on this computer; each user has their own notes.</p>` : `<p class="muted">To install once for every user of this computer, run SeforimStudio-Setup.exe and tick “Install for ALL users”.</p>`}
       <div class="grid g2" style="margin-top:8px">
         <div><b>Use the AI models from a USB stick or another folder</b><p class="muted">No copying needed — the app runs them from there. (A USB stick with a <code>SeforimAI</code> folder is found automatically.)</p>
-          <div class="row"><input id="locAi" placeholder="e.g. E:\\SeforimAI" style="flex:1"><button class="btn" id="locAiGo">Use this folder</button></div>
-          <div class="row" style="margin-top:6px"><input id="locCopy" placeholder="Copy my AI models to… e.g. E:\\" style="flex:1"><button class="btn" id="locCopyGo">Copy to USB</button></div>
+          <div class="row"><input id="locAi" data-pick="folder" placeholder="e.g. E:\\SeforimAI" style="flex:1"><button class="btn" id="locAiGo">Use this folder</button></div>
+          <div class="row" style="margin-top:6px"><input id="locCopy" data-pick="folder" placeholder="Copy my AI models to… e.g. E:\\" style="flex:1"><button class="btn" id="locCopyGo">Copy to USB</button></div>
           <div class="progress" style="margin-top:6px"><div id="locBar"></div></div><div id="locStat"></div></div>
         <div><b>Use a library from a USB stick or another drive</b><p class="muted">Point to a folder that has <code>library.sqlite</code> (e.g. to keep the 11 GB library off drive C:).</p>
-          <div class="row"><input id="locLib" placeholder="e.g. D:\\SeforimLibrary" style="flex:1"><button class="btn" id="locLibGo">Use this library</button></div>
+          <div class="row"><input id="locLib" data-pick="folder" placeholder="e.g. D:\\SeforimLibrary" style="flex:1"><button class="btn" id="locLibGo">Use this library</button></div>
           ${Object.keys(L.custom || {}).length ? `<button class="btn small" id="locReset" style="margin-top:6px">Back to the normal places</button>` : ""}</div></div>`;
     const set = async a => { try { await App.api("locations", a); App.toast("Saved"); this.drawLocations(); Library.loadTree && Library.loadTree(); } catch (e) { App.toast(e.message, true); } };
     $("#locAiGo").onclick = () => set({ ai: $("#locAi").value });
@@ -44,7 +44,7 @@ const Settings = {
         <button class="btn" id="stCat">Load a different catalog .db…</button>
         <h2>Your offline library</h2><p><b>${st.library.works}</b> seforim · <b>${st.library.passages.toLocaleString()}</b> passages · ${st.library.words.toLocaleString()} distinct words · ${st.library.links.toLocaleString()} cross-references · ${st.library.size_mb} MB</p>
         <h2>Pre-built full library</h2><p class="small">Downloaded <b>SeforimLibrary.sqlite.xz</b> (or its parts)? Put the file(s) in this app's folder or leave them in Downloads, then press the button. Your own notes and seforim are kept.</p>
-        <div class="row"><input id="stInstDir" placeholder="(optional) folder where the download is" style="flex:1"><button class="btn primary" id="stInst">📥 Install library download</button></div>
+        <div class="row"><input id="stInstDir" data-pick="folder" placeholder="(optional) folder where the download is" style="flex:1"><button class="btn primary" id="stInst">📥 Install library download</button></div>
         <p class="small" id="stInstMsg">${st.install && st.install.message ? esc(st.install.message) : ""}</p>
         <h2>Hebrew names of seforim</h2><p class="small" id="stHe">…</p>
         <div class="row"><button class="btn" id="stHeDl" title="Downloads ~116 MB once: exact Hebrew title, author and date of every sefer">⬇ Get exact Hebrew titles for all seforim (one time)</button></div>
@@ -67,7 +67,7 @@ const Settings = {
     $("#stHeDl").onclick = async () => { const r = await App.api("dl_titles"); if (r.started) { App.toast("Downloading Hebrew titles…"); this.poll(); } else App.toast("Another download is running — try again when it finishes"); };
     $("#stCompact").onclick = async () => { App.toast("Compacting…"); const r = await App.api("compact"); App.toast(`Done — ${r.size_mb} MB`); };
     $("#stOpen").onclick = () => App.api("open_folder", {});
-    $("#stFolder").onclick = async () => { const p = await App.prompt("Folder that contains the Sefaria export (with json/ inside):", "D:\\Sefaria-Export"); if (!p) return; const { job } = await App.api("import_folder", { path: p }); const n = await App.job(job, s => $("#dlStat").textContent = "Importing…"); App.toast(`Imported ${n} seforim`); Library.loadTree(); this.tab("library"); };
+    $("#stFolder").onclick = async () => { const p = await App.pickFolder("Choose the folder that contains the Sefaria export (with json\\ inside)"); if (!p) return; const { job } = await App.api("import_folder", { path: p }); const n = await App.job(job, s => $("#dlStat").textContent = "Importing…"); App.toast(`Imported ${n} seforim`); Library.loadTree(); this.tab("library"); };
     $("#dlGo").onclick = async () => {
       const cats = $$("[data-path]:checked", el).map(i => i.dataset.path); if (!cats.length) return App.toast("Tick at least one section");
       const r = await App.api("dl_start", { categories: cats, english: $("#dlEn").checked, links: $("#dlLinks").checked });
@@ -110,6 +110,7 @@ const Settings = {
       <label>Font for Word exports ${fsel("export_font", "David")}</label>
       <label><input type="checkbox" data-k="cite_on_copy" ${s.cite_on_copy !== false ? "checked" : ""}> Add citation + link when copying from the library</label>
       <label><input type="checkbox" data-k="restore_session" ${s.restore_session !== false ? "checked" : ""}> Reopen my books & tabs when the app starts</label>
+      <label><input type="checkbox" id="stAskSave" ${s.ask_save !== "0" ? "checked" : ""}> Ask where to save files (Save as…) — otherwise they go to Downloads</label>
       <label><input type="checkbox" data-k="heb_default" ${s.heb_default ? "checked" : ""}> Start with Hebrew typing on (English keys → Hebrew)</label>
       <label><input type="checkbox" data-k="comm_new_tab" ${s.comm_new_tab ? "checked" : ""}> Open commentary links in a new tab</label>
       <label><input type="checkbox" data-k="keep_paste_format" ${s.keep_paste_format ? "checked" : ""}> Keep formatting when pasting into Notes</label></div>
@@ -122,6 +123,7 @@ const Settings = {
       <div class="row"><b>Quick pick:</b>${[["New York", 40.71, -74.0, -5], ["Lakewood", 40.096, -74.217, -5], ["Monsey", 41.111, -74.068, -5], ["Jerusalem", 31.778, 35.235, 2], ["Bnei Brak", 32.081, 34.833, 2], ["London", 51.5074, -0.1278, 0], ["Montreal", 45.5, -73.57, -5], ["Los Angeles", 34.05, -118.24, -8]].map(c => `<button class="btn small" data-loc='${JSON.stringify(c)}'>${c[0]}</button>`).join("")}</div>
       <h2>Interface</h2><p class="small muted">Theme and language are in the top bar. “Auto (zmanim)” switches to dark after shkia and light after netz.</p></div></div>`;
     $$("[data-k]", el).forEach(i => i.onchange = async () => { await App.setSetting(i.dataset.k, i.type === "checkbox" ? i.checked : (i.type === "number" ? +i.value : i.value)); App.applySettings(); });
+    $("#stAskSave", el).onchange = e => App.setSetting("ask_save", e.target.checked ? "1" : "0");
     $$("[data-loc]", el).forEach(b => b.onclick = async () => { const [n, la, lo, tz] = JSON.parse(b.dataset.loc); for (const [k, v] of [["location_name", n], ["lat", la], ["lon", lo], ["tz", tz], ["israel", tz === 2]]) await App.setSetting(k, v); this.t_appearance(el); App.toast("Location: " + n); });
   },
   async t_privacy(el) {
@@ -139,10 +141,10 @@ const Settings = {
   profileDialog() { App.show("settings"); this.tab("privacy"); },
   t_backup(el) {
     el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">Backup</h2><p class="small">Saves all profiles (notes, documents, bookmarks, covers, sheets, settings) into one .zip — copy it to a USB stick or another drive.</p>
-      <div class="row"><input id="bDir" placeholder="Folder (blank = data\\backups)" style="flex:1"><button class="btn primary" id="bGo">Back up now</button></div><button class="btn" id="bRes" style="margin-top:8px">Restore from a backup .zip…</button></div>
+      <div class="row"><input id="bDir" data-pick="folder" placeholder="Folder (blank = data\\backups)" style="flex:1"><button class="btn primary" id="bGo">Back up now</button></div><button class="btn" id="bRes" style="margin-top:8px">Restore from a backup .zip…</button></div>
       <div class="card" style="grid-column:1/-1;background:var(--gold-soft)"><h2 style="margin-top:0">📦 One complete zip for another computer</h2>
         <p class="small">Makes <b>one file</b> with everything — the app, the whole library, the AI handwriting reader, all fonts and your notes. Copy it to any offline computer (USB / external drive), right-click → <b>Extract All</b>, and double-click <b>SeforimStudio.exe</b> inside. Nothing to install there.</p>
-        <div class="row"><input id="bzDest" style="flex:1" placeholder="Where to save (blank = Desktop\SeforimStudio-Complete.zip — or type a USB drive, e.g. E:\SeforimStudio-Complete.zip)">
+        <div class="row"><input id="bzDest" data-pick="folder" style="flex:1" placeholder="Where to save (blank = Desktop\SeforimStudio-Complete.zip — or type a USB drive, e.g. E:\SeforimStudio-Complete.zip)">
           <button class="btn gold" id="bzGo">📦 Make the complete zip</button></div>
         <div class="progress hidden" id="bzProg" style="margin-top:8px"><div></div></div><p class="small" id="bzMsg"></p></div>
       <div class="card"><h2 style="margin-top:0">Export / import my data</h2><p class="small">One readable JSON file with everything in this profile — to move to another computer or keep as an archive.</p>

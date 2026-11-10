@@ -48,6 +48,8 @@ if ($LASTEXITCODE -ne 0) { throw "Package install failed." }
 # 3. Build the .exe
 Step "3/5  Building SeforimStudio.exe (takes a few minutes)"
 Push-Location $Root
+# the offline dictionary + word-by-word Tanach (Translate screen, interlinear)
+if (-not (Test-Path "langdata\lang.sqlite")) { & $Py tools\build_langdata.py --out langdata\lang.sqlite --cache "$Work\langcache"; if ($LASTEXITCODE -ne 0) { Write-Host "(dictionary build failed - continuing without it)" } }
 & $Py -m PyInstaller SeforimStudio.spec --noconfirm --clean --workpath "$Work\pyi" --distpath "$Work\dist"
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "PyInstaller failed." }
 Pop-Location
@@ -80,6 +82,7 @@ try {
     if (-not (Test-Path "$tsDir\tesseract.exe")) { throw "not installed" }
     New-Item -ItemType Directory -Force -Path "$tsDir\tessdata" | Out-Null
     Invoke-WebRequest $HebUrl -OutFile "$tsDir\tessdata\heb.traineddata"
+    Invoke-WebRequest "https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata" -OutFile "$tsDir\tessdata\eng.traineddata"
     # the cursive handwriting (ktav) reader trained for Seforim Studio
     Get-ChildItem "scanner\models\*.traineddata" -ErrorAction SilentlyContinue | Copy-Item -Destination "$tsDir\tessdata\"
     $langs = & "$tsDir\tesseract.exe" --list-langs 2>&1

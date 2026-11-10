@@ -41,7 +41,7 @@ const Personal = {
         const html = notes.map(n => `<h3>${esc(n.ref)}</h3><p>${esc(n.text)}</p>${n.tags ? `<p style="color:#888">${esc(n.tags)}</p>` : ""}`).join("");
         App.modal(`<h3>Export notes</h3><div class="row"><button class="btn" data-f="docx">Word</button><button class="btn" data-f="html">HTML</button><button class="btn" data-f="txt">Text</button><button class="btn" data-f="md">Markdown</button><button class="btn" data-f="csv">CSV</button></div><div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn" data-close>Close</button></div>`, m => {
           m.onclick = async e => { const f = e.target.dataset.f; if (!f) return;
-            if (f === "csv") { const csv = "﻿ref,note,tags,updated\n" + notes.map(n => [n.ref, n.text, n.tags, n.updated].map(x => `"${String(x || "").replace(/"/g, '""')}"`).join(",")).join("\n"); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = "my-notes.csv"; a.click(); return; }
+            if (f === "csv") { const csv = "﻿ref,note,tags,updated\n" + notes.map(n => [n.ref, n.text, n.tags, n.updated].map(x => `"${String(x || "").replace(/"/g, '""')}"`).join(",")).join("\n"); App.saveData(csv, "my-notes.csv"); return; }
             const r = await App.api("export_doc", { format: f, title: "My notes", html, title_in_doc: true }); App.download(r.url); };
         });
       };

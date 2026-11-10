@@ -36,7 +36,8 @@ for f in os.listdir(PARTS):
         shutil.move(os.path.join(PARTS, f), os.path.join(dl, f))  # works across drives (C: / D:)
 say("AI pack parts in Downloads: " + ", ".join(sorted(f for f in os.listdir(dl) if f.startswith("SeforimAI"))))
 
-proc = subprocess.Popen([exe, "--no-window", "--port", str(PORT)], cwd=inst)
+DEBUG = os.path.join(OUT, "ai_debug.txt")
+proc = subprocess.Popen([exe, "--no-window", "--port", str(PORT)], cwd=inst, env={**os.environ, "SEFORIM_AI_DEBUG": DEBUG})
 tok = None
 for _ in range(90):
     try:
@@ -92,6 +93,7 @@ if ok_all:
         while not (r2 := api("job", id=o["job"]))["done"]:
             time.sleep(3)
         text = r2["result"]["pages"][0] if r2.get("result") else str(r2.get("error"))
+        say(f"(job: {json.dumps({k: v for k, v in r2.items() if k != 'result'}, ensure_ascii=False)[:500]})")
         secs = int(time.time() - t1)
         tf = os.path.join(HERE, "data", os.path.splitext(sample)[0] + ".txt")
         if not os.path.exists(tf):  # no answer key: just show what it read
@@ -103,6 +105,11 @@ if ok_all:
         if sample == "handwriting_sample.jpg":
             ok_all = ok_all and cer < 0.35
 proc.terminate()
+if os.path.exists(DEBUG):
+    report.append("\n== raw AI answers ==\n" + open(DEBUG, encoding="utf-8", errors="replace").read()[-6000:])
+for lf in (os.path.join(inst, "data", "app_log.txt"),):
+    if os.path.exists(lf):
+        report.append("\n== app log (end) ==\n" + open(lf, encoding="utf-8", errors="replace").read()[-4000:])
 with open(os.path.join(OUT, "ai_report.md"), "w", encoding="utf-8") as f:
     f.write("# AI handwriting reader test (Windows)\n\n```\n" + "\n".join(report) + "\n```\n")
 sys.exit(0 if ok_all else 1)

@@ -423,7 +423,7 @@ const Cover = {
   async save() { this.read(); const r = await App.api("ud_save", { table: "covers", row: { id: this.d.id, title: this.d.title || "Cover", data: JSON.stringify(this.d) } }); this.d.id = r.id; App.toast("Cover saved"); },
   async load(id) { const c = await App.api("ud_get", { table: "covers", id }); this.d = { ...this.defaults(), ...JSON.parse(c.data), id: c.id }; this.fill(); this.draw(); },
   hiRes() { const c = document.createElement("canvas"); const { W, H } = this.dims(3); c.width = W; c.height = H; this._screen = false; this.paintFull(c.getContext("2d"), 3); this._screen = true; return c; },
-  exportPng() { const c = this.hiRes(); const a = document.createElement("a"); a.href = c.toDataURL("image/png"); a.download = (this.d.title || "cover") + ".png"; a.click(); },
+  exportPng() { const c = this.hiRes(); App.saveData(c.toDataURL("image/png"), (this.d.title || "cover") + ".png"); },
   print() {
     const c = this.hiRes(); const img = new Image(); img.src = c.toDataURL("image/png"); img.className = "print-area"; img.style.width = "100%";
     const [w, h] = SIZES[this.d.size]; const st = document.createElement("style"); st.textContent = `@page{size:${this.d.wrap ? (2 * w + .9) : w}in ${h}in;margin:0}`;

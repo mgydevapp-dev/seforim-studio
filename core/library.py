@@ -95,6 +95,12 @@ class Library:
         CREATE INDEX IF NOT EXISTS ix_l1 ON links(ref1);
         CREATE INDEX IF NOT EXISTS ix_l2 ON links(ref2);
         """)
+        # newer column: the literal ("basic") translation, where the source marks it
+        if "en_basic" not in [r[1] for r in c.execute("PRAGMA table_info(passages)")]:
+            try:
+                c.execute("ALTER TABLE passages ADD COLUMN en_basic TEXT")
+            except sqlite3.OperationalError:
+                pass
         try:
             c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts_he USING fts5(he_plain, he_skel, content='', "
                       "contentless_delete=1, tokenize='unicode61 remove_diacritics 0')")
@@ -195,6 +201,10 @@ class Library:
                 if key not in rows:
                     rows[key] = {"he": "", "en": ""}
                     order.append(key)
+                if lang == "en" and "<b>" in (s or ""):
+                    # the literal translation is in bold (e.g. the William Davidson Talmud), the explanation is not:
+                    # keep the literal part too, so the reader can choose a basic or an explanatory translation
+                    rows[key]["en_basic"] = " ".join(H.strip_html(b).strip() for b in re.findall(r"<b>(.*?)</b>", s, flags=re.S))
                 rows[key][lang] = H.strip_html(s).strip()
         he_title = (he_json or en_json or {}).get("heTitle") or (schema_json or {}).get("heTitle") or he_name(title)
         meta = schema_json or {}
@@ -226,9 +236,9 @@ class Library:
                 verse = ":".join(labels[1:]) if len(labels) > 1 else (labels[0] if labels else "")
                 ref = self.make_ref(title, node, labels)
                 seq += 1
-                cur = self.db.execute("""INSERT INTO passages(work_id,seq,node,chapter,verse,ref,he,en,he_plain,initials,finals)
-                    VALUES(?,?,?,?,?,?,?,?,?,?,?)""", (work["id"], seq, ", ".join(node), chapter, verse, ref, he, en,
-                                                       plain, initials, finals))
+                cur = self.db.execute("""INSERT INTO passages(work_id,seq,node,chapter,verse,ref,he,en,he_plain,initials,finals,en_basic)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (work["id"], seq, ", ".join(node), chapter, verse, ref, he, en,
+                                                       plain, initials, finals, rows[key].get("en_basic") or None))
                 pid = cur.lastrowid
                 if plain:
                     self.db.execute("INSERT INTO fts_he(rowid,he_plain,he_skel) VALUES(?,?,?)", (pid, plain, skel))
@@ -323,11 +333,11 @@ class Library:
                       "GROUP BY node, chapter ORDER BY first_seq", (work_id,))
 
     def chapter(self, work_id, node, chapter):
-        return self.q("SELECT id,seq,node,chapter,verse,ref,he,en FROM passages WHERE work_id=? AND node=? AND chapter=? "
+        return self.q("SELECT id,seq,node,chapter,verse,ref,he,en,en_basic FROM passages WHERE work_id=? AND node=? AND chapter=? "
                       "ORDER BY seq", (work_id, node, chapter))
 
     def passages_range(self, work_id, seq_from, count=200):
-        return self.q("SELECT id,seq,node,chapter,verse,ref,he,en FROM passages WHERE work_id=? AND seq>=? ORDER BY seq LIMIT ?",
+        return self.q("SELECT id,seq,node,chapter,verse,ref,he,en,en_basic FROM passages WHERE work_id=? AND seq>=? ORDER BY seq LIMIT ?",
                       (work_id, seq_from, count))
 
     def passage(self, pid):
@@ -864,12 +874,26 @@ class Library:
         for r in refs:
             rows += self.q("SELECT ref2 AS other, type, cat2 AS cat FROM links WHERE ref1=? LIMIT ?", (r, limit))
             rows += self.q("SELECT ref1 AS other, type, cat1 AS cat FROM links WHERE ref2=? LIMIT ?", (r, limit))
+        # links written for a range that includes this passage (e.g. a commentary on Genesis 1:1-3 when reading 1:2)
+        if len(parts) == 2 and parts[1].isdigit():
+            n = int(parts[1])
+            for side, oth, cat in (("ref1", "ref2", "cat2"), ("ref2", "ref1", "cat1")):
+                for l in self.q(f"SELECT {side} AS me, {oth} AS other, type, {cat} AS cat FROM links WHERE {side}>=? AND {side}<? "
+                                f"AND instr({side}, '-')>0 LIMIT 2000", (parts[0] + ":", parts[0] + ";")):
+                    m = re.fullmatch(r"(\d+)-(\d+)", l["me"][len(parts[0]) + 1:])
+                    if m and int(m.group(1)) <= n <= int(m.group(2)):
+                        rows.append({"other": l["other"], "type": l["type"], "cat": l["cat"]})
         seen, groups = set(), defaultdict(list)
         for l in rows:
             if l["other"] in seen:
                 continue
             seen.add(l["other"])
             o = l["other"]
+            if "-" in o.rsplit(" ", 1)[-1]:
+                texts = self._range_texts(o)
+                title = texts[0]["title"] if texts else re.sub(r"\s[\d:ab\-]+$", "", o)
+                groups[title].append({"ref": o, "type": l["type"], "cat": l["cat"], "texts": texts})
+                continue
             texts = self.q("SELECT * FROM (SELECT p.id, p.seq, p.ref, p.he, p.en, w.title, w.he_title FROM passages p JOIN works w ON w.id=p.work_id "
                            "WHERE p.ref=? UNION ALL SELECT p.id, p.seq, p.ref, p.he, p.en, w.title, w.he_title FROM passages p "
                            "JOIN works w ON w.id=p.work_id WHERE p.ref>=? AND p.ref<?) ORDER BY seq LIMIT 30", (o, o + ":", o + ";"))
@@ -878,6 +902,23 @@ class Library:
         from .order import he_name
         return [{"title": k, "he_title": he_name(k), "items": v, "local": any(i["texts"] for i in v)} for k, v in
                 sorted(groups.items(), key=lambda kv: (not any(i["texts"] for i in kv[1]), kv[0]))]
+
+    def _range_texts(self, o):
+        """Text of a range like 'Ramban on Genesis 1:1:1-4', 'Berakhot 2a:3-2b:4'."""
+        head, tail = o.rsplit("-", 1)
+        base, last = head.rsplit(" ", 1)
+        a_parts, t_parts = last.split(":"), tail.split(":")
+        end = base + " " + ":".join(a_parts[:len(a_parts) - len(t_parts)] + t_parts)
+        first = lambda r: self.q1("SELECT p.work_id, p.seq FROM passages p WHERE p.ref=? OR (p.ref>=? AND p.ref<?) ORDER BY p.seq LIMIT 1",
+                                  (r, r + ":", r + ";"))
+        last_ = lambda r: self.q1("SELECT p.work_id, p.seq FROM passages p WHERE p.ref=? OR (p.ref>=? AND p.ref<?) ORDER BY p.seq DESC LIMIT 1",
+                                  (r, r + ":", r + ";"))
+        a, b = first(head), last_(end)
+        if not a:
+            return []
+        hi = b["seq"] if b and b["work_id"] == a["work_id"] else a["seq"]
+        return self.q("SELECT p.id, p.seq, p.ref, p.he, p.en, w.title, w.he_title FROM passages p JOIN works w ON w.id=p.work_id "
+                      "WHERE p.work_id=? AND p.seq BETWEEN ? AND ? ORDER BY p.seq LIMIT 30", (a["work_id"], a["seq"], max(hi, a["seq"])))
 
     def user_link_targets(self, refs):
         return [self.find_ref(r) for r in refs]

@@ -7,3 +7,4 @@ SeforimStudio-Portable/
 SeforimStudio-Portable.zip
 data/*
 !data/seforim_catalog.db
+langdata/

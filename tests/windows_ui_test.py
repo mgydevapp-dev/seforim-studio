@@ -52,6 +52,7 @@ for _ in range(60):
 check("exe starts and answers", TOKEN)
 if not TOKEN:
     sys.exit(1)
+api("setting", key="ask_save", value="0")  # the robot cannot answer "Save as" boxes: save to Downloads
 
 # ------------------------------------------------------------------ library: import sample folder + REAL downloads
 try:

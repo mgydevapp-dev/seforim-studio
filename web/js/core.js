@@ -41,7 +41,35 @@ const App = {
     return j;
   },
   fileUrl(u, download) { if (!u) return u; return u + (u.includes("?") ? "&" : "?") + "t=" + TOKEN + (download ? "&dl=1" : ""); },
-  download(u) { const a = document.createElement("a"); a.href = this.fileUrl(u, true); a.download = ""; document.body.appendChild(a); a.click(); a.remove(); },
+  browserDownload(u) { const a = document.createElement("a"); a.href = this.fileUrl(u, true); a.download = ""; document.body.appendChild(a); a.click(); a.remove(); },
+  /* save a file of the app: a Windows "Save as" box lets you choose the folder (Settings can switch back to plain Downloads) */
+  async download(u, name) {
+    if ((this.state.settings || {}).ask_save === "0") return this.browserDownload(u);
+    try {
+      const r = await this.api("save_as", { url: u, name });
+      if (r.saved) this.toast("Saved: " + r.path);
+    } catch (e) { this.browserDownload(u); }
+  },
+  async saveData(data, name) {
+    if ((this.state.settings || {}).ask_save !== "0") {
+      try { const r = await this.api("save_data", { data, name }); if (r.saved) this.toast("Saved: " + r.path); return; } catch (e) { }
+    }
+    const a = document.createElement("a"); a.href = data.startsWith("data:") ? data : URL.createObjectURL(new Blob([data])); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  },
+  async pickFolder(title, start) { const r = await this.api("pick", { kind: "folder", title, start }); return r.path || ""; },
+  async pickFile(title, filters) { const r = await this.api("pick", { kind: "file", title, filters }); return r.path || ""; },
+  /* every box that asks for a folder or file gets a "Choose…" button next to it */
+  addPickers(root) {
+    $$("input[data-pick]:not([data-picker])", root || document).forEach(inp => {
+      inp.dataset.picker = "1";
+      const b = h(`<button class="btn small pick-btn" type="button" title="Choose with Windows">📂 Choose…</button>`);
+      b.onclick = async () => {
+        const p = inp.dataset.pick === "file" ? await this.pickFile(inp.placeholder || "Choose a file") : await this.pickFolder(inp.placeholder || "Choose a folder", inp.value);
+        if (p) { inp.value = p; inp.dispatchEvent(new Event("change", { bubbles: true })); }
+      };
+      inp.after(b);
+    });
+  },
   async job(id, onProgress) {
     while (true) {
       const s = await this.api("job", { id });
@@ -89,7 +117,7 @@ const App = {
   },
   buildRail() {
     const r = $("#rail"); r.innerHTML = "";
-    const CORE = ["home", "library", "search", "gematria", "roshei", "analysis", "tools", "calendar", "notes", "mylib", "cover", "scanner", "share"];
+    const CORE = ["home", "library", "search", "translate", "gematria", "roshei", "analysis", "tools", "calendar", "notes", "mylib", "cover", "scanner", "share"];
     const core = this.order.filter(i => CORE.includes(i));
     const addons = this.order.filter(i => !CORE.includes(i) && i !== "plugins" && i !== "settings");
     const add = id => { const p = this.pages[id]; if (!p) return;
@@ -133,6 +161,7 @@ const App = {
     const pc = this.prevChar(el), last = pc[0], before = pc[1];
     if (last && FINAL_OF[last] && before && /[\u05d0-\u05ea]/.test(before)) { document.execCommand("delete"); this.insertText(FINAL_OF[last], el); }
   },
+  initPickers() { this.addPickers(); new MutationObserver(() => this.addPickers()).observe(document.body, { childList: true, subtree: true }); },
   initKeyboard() {
     try { if (localStorage.getItem("heb_kb") === "1") setTimeout(() => this.setHeb(true), 0); } catch (e) { }
     document.addEventListener("keydown", e => {
@@ -320,7 +349,7 @@ const App = {
   },
 
   async start() {
-    this.initKeyboard(); this.initOSK(); this.initClipCatcher();
+    this.initKeyboard(); this.initOSK(); this.initClipCatcher(); this.initPickers();
     this.state.status = await this.api("status");
     if (this.state.status.install && this.state.status.install.state === "running") await this.waitInstall();
     this.state.settings = this.state.status.settings || {};
