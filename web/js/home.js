@@ -10,7 +10,7 @@ const Home = {
     <div class="home-hero">
       <div class="card">
         <div class="row"><div><div class="he-date">${esc(d.hebrew)}</div><div class="muted">${esc(d.weekday)} · ${new Date(d.date + "T12:00").toLocaleDateString(undefined, { dateStyle: "long" })} · ${esc(d.hebrew_en)}</div></div><span class="spacer"></span>
-        <div class="col" style="align-items:flex-end"><span class="pill">Parashas ${esc(d.parasha)}</span><span class="he" style="font-size:20px">${esc(d.parasha_he)}</span></div></div>
+        ${d.parasha ? `<div class="col" style="align-items:flex-end"><span class="pill">Parashas ${esc(d.parasha)}</span><span class="he" style="font-size:20px">${esc(d.parasha_he)}</span></div>` : ""}</div>
         ${d.today_holidays.length ? `<p><b>Today:</b> ${d.today_holidays.map(x => esc(x[0]) + " — " + esc(x[1])).join(", ")}</p>` : ""}
         ${d.omer ? `<p class="he" style="font-size:17px">🌾 ${esc(d.omer)}</p>` : ""}
         <div class="grid g3" style="margin-top:10px">
@@ -18,6 +18,9 @@ const Home = {
           <div class="card feature-tile" id="hPar"><div class="muted small">This week's parasha</div><div class="he" style="font-size:26px">${esc(d.parasha_he)}</div><div class="small">Open in library ›</div></div>
           <div class="card"><div class="muted small">Library</div><div style="font-size:24px;color:var(--accent);font-weight:700">${st.works.toLocaleString()}</div><div class="small">seforim · ${st.passages.toLocaleString()} passages</div></div>
         </div>
+        <div class="home-search"><input id="hQ" placeholder="Search the seforim, go to a place (Berakhot 2a), or translate a word…"><button class="btn primary" id="hGo">Search</button><button class="btn" id="hTr">🌐 Translate</button></div>
+        <div class="quick-acts">${[["library", "📚", "Library"], ["search", "🔎", "Search"], ["translate", "🌐", "Translate"], ["gematria", "🔢", "Gematria"], ["scanner", "📷", "Scan notes"], ["notes", "✍️", "Write notes"], ["mitzvos", "📜", "613 Mitzvos"], ["cover", "📕", "Make a cover"]]
+          .filter(([id]) => App.pages[id]).map(([id, ic, t]) => `<button class="qa" data-go-page="${id}"><span>${ic}</span>${esc(t)}</button>`).join("")}</div>
       </div>
       <div class="card"><div class="row"><b>Zmanim</b><span class="muted small">— ${esc(d.location.name)}</span><span class="spacer"></span><a href="#" id="hLoc" class="small">change</a></div>
         <table class="data" style="margin-top:6px">${zKeys.filter(k => z[k]).map(k => `<tr><td>${esc(k)}</td><td style="text-align:right;font-weight:600">${esc(z[k])}</td></tr>`).join("")}</table></div>
@@ -52,6 +55,10 @@ const Home = {
     }).catch(() => {});
     $$("[data-go]", el).forEach(x => x.onclick = () => App.show(x.dataset.go));
     $("#hDaf", el).onclick = () => App.quickGo(d.daf.ref);
+    const hq = () => { const v = $("#hQ", el).value.trim(); if (v) App.quickGo(v); };
+    $("#hGo", el).onclick = hq; $("#hQ", el).onkeydown = e => { if (e.key === "Enter") hq(); };
+    $("#hTr", el).onclick = () => { const v = $("#hQ", el).value.trim(); App.show("translate"); if (v) setTimeout(() => { $("#trQ").value = v; App.pages.translate.run(v); }, 50); };
+    $$("[data-go-page]", el).forEach(b => b.onclick = () => App.show(b.dataset.goPage));
     $("#hPar", el).onclick = async () => { const ref = await App.api("reference_data"); const p = ref.parshiyos.find(x => d.parasha.startsWith(x[0]) || x[0].startsWith(d.parasha.split(/[ -]/)[0])); App.quickGo(p ? p[2] : "Genesis 1:1"); };
     $$("[data-ref]", el).forEach(x => x.onclick = () => App.quickGo(x.dataset.ref));
     $$("[data-texts]", el).forEach(x => x.onclick = () => { const t = JSON.parse(x.dataset.texts); if (t.length) App.quickGo(t[0]); });
