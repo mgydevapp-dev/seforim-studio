@@ -1266,7 +1266,7 @@ class App:
         strips = a.get("strips")
 
         def run(progress=None, cancel=None):
-            out = []
+            out, fallback = [], []
             for i, p in enumerate(pages):
                 if cancel and cancel():
                     break
@@ -1296,6 +1296,20 @@ class App:
                         out.append(eng.read_image(engines.imread(path), n_strips, sub, cancel))
                 except Exception as e:  # noqa
                     out.append(f"[page {i + 1}: {e}]")
+                # the AI gave nothing / junk: try the offline print + cursive reader too and keep the better text
+                if eng.key == "ollama" and (out[-1].startswith("[page") or engines.text_quality(out[-1]) < 0.35):
+                    try:
+                        tess = engines.TesseractEngine()
+                        if tess.available()[0]:
+                            tess.kind = a.get("kind") or "hand"
+                            if progress:
+                                progress(i, len(pages), f"Page {i + 1}: also trying the offline cursive reader…")
+                            t2 = tess.read_image(engines.imread(engines.best_input(p["files"], "tesseract")), None, None, cancel)
+                            if engines.text_quality(t2) > engines.text_quality(out[-1]) + 0.1:
+                                out[-1] = t2
+                                fallback.append(i + 1)
+                    except Exception:
+                        traceback.print_exc()
             if progress:
                 progress(len(pages), len(pages), "done")
             if not engines.KNOWN_WORDS:
@@ -1312,6 +1326,9 @@ class App:
                         ("Choose engine A (AI) to read handwriting." if ai_ok else
                          "To read handwriting, install the AI reader: download the 3 SeforimAI.tar.part… files into Downloads, "
                          "then press 'Install AI pack' under 'Readers on this computer' (or restart the app)."))
+            if fallback:
+                warn = (f"The AI could not read page(s) {', '.join(map(str, fallback))} well, so the offline cursive reader's text is "
+                        "shown there. For very messy writing try 'Unclear / messy', or a clearer photo (good light, straight on).")
             return {"engine": eng.name, "pages": out, "quality": quality, "warning": warn}
         return {"job": self.jobs.start(run), "engine": eng.name}
 

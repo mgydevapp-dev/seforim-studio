@@ -154,8 +154,41 @@ class OllamaEngine:
         with _LOCAL.open(req, timeout=self.timeout) as r:
             return json.loads(r.read())
 
-    def _ask(self, body):
+    def _stream(self, body, progress=None):
+        """Ask with streaming: the text arrives piece by piece (shown as progress) - no long silent wait."""
+        b = dict(body, stream=True)
+        req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(b).encode(), headers={"Content-Type": "application/json"})
+        text, last = [], 0
+        with _LOCAL.open(req, timeout=self.timeout) as r:
+            for line in r:
+                if not line.strip():
+                    continue
+                j = json.loads(line)
+                piece = (j.get("message") or {}).get("content") or ""
+                if piece:
+                    text.append(piece)
+                    n = sum(len(x) for x in text)
+                    if progress and n - last > 15:
+                        last = n
+                        progress("".join(text)[-60:].replace("\n", " "))
+                if j.get("done"):
+                    break
+        c = "".join(text)
+        if "</think>" in c:
+            c = c.split("</think>", 1)[1]
+        return c.strip()
+
+    def _ask(self, body, progress=None):
         """Ask the AI; copes with Ollama versions with/without the "think" switch and with thinking models."""
+        try:
+            c = self._stream(body, progress)
+            if c:
+                return c
+        except urllib.error.HTTPError:
+            pass
+        except Exception as e:  # noqa
+            if AI_DEBUG:
+                open(AI_DEBUG, "a", encoding="utf-8").write(f"--- stream failed: {e}\n")
         def text_of(out):
             msg = out.get("message") or {}
             c = msg.get("content") if msg else out.get("response", "")
@@ -248,7 +281,7 @@ class OllamaEngine:
                                   f"\n(This is part {i + 1} of {len(parts)} of a page; transcribe only what is visible.)"),
                                   "images": [_to_png_b64(part)]}]}
             req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-            content = self._ask(body)
+            content = self._ask(body, (lambda t, i=i: progress(i, len(parts), "AI is writing: …" + t)) if progress else None)
             texts.append(clean_transcription(content))
         return merge_strips(texts)
 
