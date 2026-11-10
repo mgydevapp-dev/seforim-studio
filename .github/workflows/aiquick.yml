@@ -11,10 +11,12 @@ jobs:
       - name: Ollama + model
         run: |
           curl -fsSL https://ollama.com/install.sh | sh >/dev/null
+          (ollama serve > serve.log 2>&1 &); sleep 6
           ollama --version
           ollama pull qwen3-vl:4b > /dev/null 2>&1; ollama list
       - name: Read 2 pages with the app's AI code
         run: |
+          pgrep ollama > /dev/null || (ollama serve > serve.log 2>&1 &); sleep 3
           pip install -q opencv-python-headless numpy
           export SEFORIM_AI_DEBUG=$PWD/ai_debug.txt
           python - <<'P'
@@ -31,3 +33,4 @@ jobs:
               print(f"\n=== {f} ({int(time.time()-t0)} s)\n{t}", flush=True)
           P
           echo "---- raw answers"; cat ai_debug.txt || true
+          echo "---- server"; tail -20 serve.log || true
