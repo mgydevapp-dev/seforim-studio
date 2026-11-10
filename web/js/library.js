@@ -18,8 +18,8 @@ const Library = {
           <button class="btn small" id="rPrev" title="Previous chapter (←)">‹ Prev</button><button class="btn small" id="rNext" title="Next chapter (→)">Next ›</button>
           <select id="rMode" title="Layout"><option value="side">Hebrew | English</option><option value="stacked">Stacked</option><option value="he">Hebrew only</option><option value="en">English only</option><option value="daf">Daf layout</option></select>
           <select id="rNikud" title="Vowels (nikud) and cantillation (trop)"><option value="full">Nikud + trop</option><option value="nikud">Nikud only</option><option value="taamim">Trop only</option><option value="none">No nikud, no trop</option></select>
-          <select id="rTr" title="Translation"><option value="full">Translation: explanatory</option><option value="basic">Translation: basic (word for word)</option><option value="inter">Interlinear (word under word)</option></select>
-          <select id="rPunct" title="Punctuation"><option value="asis">Punctuation as written</option><option value="add">Add punctuation (from the trop)</option><option value="remove">No punctuation marks</option></select>
+          <select id="rTr" title="Translation"><option value="full">English: explanatory</option><option value="basic">English: basic</option><option value="inter">Interlinear</option></select>
+          <select id="rPunct" title="Punctuation"><option value="asis">Punctuation: as written</option><option value="add">Punctuation: add (from trop)</option><option value="remove">Punctuation: none</option></select>
           <button class="btn small" id="rSmall" title="Smaller text">A−</button><button class="btn small" id="rBig" title="Bigger text">A+</button>
           <label class="small" title="Text margins">↔ <input type="range" id="rMargin" min="0" max="220" style="width:80px"></label>
           <label class="small"><input type="checkbox" id="rInf"> Infinite scroll</label>
@@ -430,12 +430,14 @@ const Library = {
         <button class="btn small" id="vPrint">🖨 Print daf</button><button class="btn small" id="vPrintC">🖨 Print commentaries only</button></div>
       <div class="v-chips">${d.commentaries.map(c => `<button class="chip ${on[c.title] ? "on" : ""}" data-cm="${esc(c.title)}" title="${esc(c.title)} · ${c.passages.length}">${esc(c.he_title)}</button>`).join("") || `<span class="small muted">No commentaries downloaded for this masechta</span>`}
         ${later.length ? `<button class="chip ${on._links ? "on" : ""}" data-cm="_links" title="Marks on the Gemara that lead to the later commentaries (printed at the back of the volume)">🔗 Links to more commentaries</button>` : ""}
-        <button class="chip" id="vOnly" title="Show just one commentary at a time">☝ one at a time</button></div>
+        <button class="chip" id="vOnly" title="Show just one commentary at a time">☝ one at a time</button>
+        <button class="chip ${on._en ? "on" : ""}" data-cm="_en" title="The English translation of this amud, under the page">English translation</button></div>
       <div class="vilna ${amudB ? "amud-b" : "amud-a"}" id="vPage">
         <div class="v-hdr"><span>${amudB ? `${App.heNum(dafNum)}` : esc(d.he_title || d.title)}</span><span>${amudB ? esc(d.he_title || d.title) : `${App.heNum(dafNum)}`}</span></div>
         <div class="v-top">${amudB ? marg(MARG_OUT) + col("Tosafot", "v-tos") : marg(MARG_IN) + col("Rashi", "v-rashi")}<div class="v-gem">${gem}</div>${amudB ? col("Rashi", "v-rashi") + marg(MARG_IN) : col("Tosafot", "v-tos") + marg(MARG_OUT)}</div>
         <div class="v-bottom">${amudB ? `<div class="v-more v-tos"></div><div class="v-more v-rashi"></div>` : `<div class="v-more v-rashi"></div><div class="v-more v-tos"></div>`}</div>
       </div>
+      ${on._en ? `<div class="vilna v-trans"><div class="v-hdr"><span>Translation</span><span class="small">${this.view.tr === "basic" ? "basic" : "explanatory"}</span></div>${t.passages.map((p, i) => `<p class="v-tr" data-seg="${esc((p.verse || String(i + 1)).split(":")[0])}">${esc(this.view.tr === "basic" && p.en_basic ? p.en_basic : p.en || "")}</p>`).join("")}</div>` : ""}
       ${extras.length ? `<div class="vilna v-back" id="vBack"><div class="v-hdr"><span>מפרשים · ${esc(d.he_title)} ${App.heNum(dafNum)}${amudB ? ":" : "."}</span></div>${extras.map(c => `<div class="v-extra" data-ex="${esc(c.title)}"><div class="v-head">${esc(c.he_title)} <small class="muted">${esc(c.title)}</small></div><div class="v-cols">${cspans(c)}</div></div>`).join("")}</div>` : ""}`;
     this.applyDafFonts(el);
     $$("[data-fp]", el).forEach(sel => sel.onchange = async () => { await App.setSetting(sel.dataset.fp, sel.value); this.drawDaf(t, cur); });
@@ -448,10 +450,10 @@ const Library = {
       const spans = $$(".cm", side);
       while (side.offsetHeight > gemH && spans.length) more.prepend(spans.pop());
     }
-    $$("[data-cm]", el).forEach(b => b.onclick = () => { if (this._solo && b.dataset.cm !== "_links") { for (const k of Object.keys(on)) if (k !== "_links") on[k] = false; on[b.dataset.cm] = true; } else on[b.dataset.cm] = !on[b.dataset.cm]; this.drawDaf(t, cur); });
+    $$("[data-cm]", el).forEach(b => b.onclick = () => { if (this._solo && !b.dataset.cm.startsWith("_")) { for (const k of Object.keys(on)) if (!k.startsWith("_")) on[k] = false; on[b.dataset.cm] = true; } else on[b.dataset.cm] = !on[b.dataset.cm]; this.drawDaf(t, cur); });
     const solo = $("#vOnly", el); solo.classList.toggle("on", !!this._solo);
     solo.onclick = () => { this._solo = !this._solo; if (this._solo) { const first = d.commentaries.find(c => on[c.title]); for (const k of Object.keys(on)) if (k !== "_links") on[k] = false; if (first) on[first.title] = true; } this.drawDaf(t, cur); };
-    const light = seg => { $$(".hl-on", el).forEach(x => x.classList.remove("hl-on")); $$(`.gs[data-seg="${seg}"], .cm[data-a="${seg}"]`, el).forEach(x => x.classList.add("hl-on")); };
+    const light = seg => { $$(".hl-on", el).forEach(x => x.classList.remove("hl-on")); $$(`.gs[data-seg="${seg}"], .cm[data-a="${seg}"], .v-tr[data-seg="${seg}"]`, el).forEach(x => x.classList.add("hl-on")); };
     $$(".gs", el).forEach(g => g.onclick = e => { if (this._editing || e.target.closest(".v-link")) return; light(g.dataset.seg); const c = $(`.cm[data-a="${g.dataset.seg}"]`, el); if (c) c.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
     $$(".cm", el).forEach(c => c.onclick = () => { if (this._editing) return; light(c.dataset.a); const g = $(`.gs[data-seg="${c.dataset.a}"]`, el); if (g) g.scrollIntoView({ block: "nearest", behavior: "smooth" }); });
     $$(".v-link", el).forEach(l => l.onclick = e => { e.stopPropagation(); const c = C(l.dataset.lc); const xs = c.passages.filter(x => x.anchor === l.dataset.a);

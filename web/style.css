@@ -350,3 +350,10 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
 .tr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0 18px; }
 .tr-ex { padding: 6px 0; border-bottom: 1px dashed var(--line); }
 .card + .card { margin-top: 12px; }
+.reader-toolbar { gap: 6px; row-gap: 6px; }
+.reader-toolbar select { width: auto; flex: 0 0 auto; padding: 4px 26px 4px 8px; font-size: 13px; max-width: 210px; }
+.reader-toolbar .btn.small { padding: 4px 9px; }
+.reader-toolbar label.small { white-space: nowrap; }
+.v-trans { direction: ltr; margin-top: 14px; font-family: var(--en-font); font-size: var(--en-size); line-height: 1.6; }
+.v-trans .v-hdr { direction: ltr; }
+.v-tr { margin: 0 0 8px; }
