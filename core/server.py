@@ -245,13 +245,15 @@ class App:
         env = dict(os.environ)
         env["OLLAMA_MODELS"] = os.path.join(self.ai_dir(), "models")
         env["OLLAMA_HOST"] = "127.0.0.1:11434"
-        env.setdefault("OLLAMA_KEEP_ALIVE", "15m")
+        env.setdefault("OLLAMA_KEEP_ALIVE", "60m")
+        env.setdefault("OLLAMA_FLASH_ATTENTION", "1")
         try:
             self.ollama_proc = winproc.popen([exe, "serve"], hidden=True, env=env, cwd=os.path.dirname(exe))
             for _ in range(40):
                 time.sleep(0.5)
                 if OllamaEngine().models() is not None:
                     print("Bundled AI reader started")
+                    threading.Thread(target=OllamaEngine().warm_up, daemon=True).start()  # first page reads faster
                     return True
         except Exception as e:  # noqa
             print("Could not start the bundled AI reader:", e)

@@ -119,7 +119,7 @@ def _similar(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio() > 0.8
 
 
-def _to_png_b64(img, max_side=1400):
+def _to_png_b64(img, max_side=1100):
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     h, w = img.shape[:2]
@@ -189,6 +189,15 @@ class OllamaEngine:
         print("AI gave no text:", last, flush=True)
         raise RuntimeError("The AI gave no text for this page (" + last + "). Try 'Unclear / messy' or the Tesseract reader.")
 
+    def warm_up(self):
+        """Load the AI model into memory in the background when the app starts, so the first page is read quickly."""
+        model = self.pick_model()
+        if model:
+            try:
+                self._post("/api/generate", {"model": model, "prompt": "", "keep_alive": "60m", "stream": False})
+            except Exception:
+                pass
+
     def models(self):
         try:
             tags = self._get("/api/tags")["models"]
@@ -224,7 +233,7 @@ class OllamaEngine:
             raise RuntimeError(self.available()[1])
         h, w = img.shape[:2]
         if strips is None:
-            strips = max(1, int(round(h / max(w * 0.9, 1) * 1.0))) if h > w * 1.25 else 1
+            strips = 1  # one look at the whole page is fastest; 'Unclear / messy' reads in parts
         parts = split_strips(img, strips, overlap=0.12) if strips > 1 else [img]
         texts = []
         for i, part in enumerate(parts):
@@ -232,8 +241,9 @@ class OllamaEngine:
                 break
             if progress:
                 progress(i, len(parts), f"AI reading part {i + 1}/{len(parts)}")
-            body = {"model": model, "stream": False, "keep_alive": "10m", "think": False,  # no hidden "thinking": just read
-                    "options": {"temperature": 0, "top_p": 0.9, "num_ctx": 8192, "num_predict": 2048},
+            body = {"model": model, "stream": False, "keep_alive": "60m", "think": False,  # no hidden "thinking": just read
+                    "options": {"temperature": 0, "top_p": 0.9, "num_ctx": 4096, "num_predict": 1200,
+                                "num_thread": max(1, (os.cpu_count() or 4)), "repeat_penalty": 1.05},
                     "messages": [{"role": "user", "content": PROMPT + ("" if len(parts) == 1 else
                                   f"\n(This is part {i + 1} of {len(parts)} of a page; transcribe only what is visible.)"),
                                   "images": [_to_png_b64(part)]}]}
