@@ -358,7 +358,11 @@ class TesseractEngine:
                 have = [f[:-12] for f in os.listdir(tdir) if f.endswith(".traineddata")]
             # +eng: English words on the page (labels, names) are read as English instead of turning into Hebrew junk
             plus = "+eng" if "eng" in have else ""
-            langs = ["heb" + plus] + (["heb_script" + plus] if "heb_script" in have else [])
+            script = "heb_script" in have
+            if getattr(self, "kind", "") == "hand":   # handwriting: Hebrew-only models first (English letters would turn into junk)
+                langs = (["heb_script"] if script else []) + ["heb"] + (["heb_script" + plus] if script and plus else [])
+            else:
+                langs = ["heb" + plus] + (["heb_script" + plus] if script else [])
             best, best_q = "", -1
             tries = [(l, psm) for l in langs for psm in ("6", "4", "11")]
             for k, (lang, psm) in enumerate(tries):
@@ -421,8 +425,8 @@ def text_quality(text):
         letters = _HEB.findall(t)
         core = "".join(letters)
         junk = sum(1 for c in t if not (_HEB.match(c) or c in "\"'׳״-.,:;!?()[]0123456789\u05b0-\u05c7"))
-        if re.fullmatch(r"[A-Za-z][a-z]{1,}[.,:;!?]?", t):  # a normal English word
-            good += 1.0
+        if re.fullmatch(r"[A-Z]?[a-z]{2,}[.,:;!?]?", t) and re.search(r"[aeiouy]", t.lower()) and not re.search(r"(.)\1\1", t):
+            good += 0.6  # looks like an English word
         elif len(core) >= 2 and junk == 0:
             good += 1.0 if (not KNOWN_WORDS or core in KNOWN_WORDS or core.lstrip("ובכלמהש") in KNOWN_WORDS) else 0.5
     return good / len(toks)
