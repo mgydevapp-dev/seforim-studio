@@ -1,0 +1,33 @@
+name: AI quick check
+on:
+  push:
+    branches: [aiquick]
+jobs:
+  ai:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: Ollama + model
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh >/dev/null
+          ollama --version
+          ollama pull qwen3-vl:4b > /dev/null 2>&1; ollama list
+      - name: Read 2 pages with the app's AI code
+        run: |
+          pip install -q opencv-python-headless numpy
+          export SEFORIM_AI_DEBUG=$PWD/ai_debug.txt
+          python - <<'P'
+          import sys, time; sys.path.insert(0, ".")
+          from scanner import engines
+          e = engines.OllamaEngine()
+          print("available:", e.available())
+          for f in ["tests/data/handwriting_sample.jpg", "tests/data/cursive_alphabet.png", "tests/data/messy_handwriting.png"]:
+              t0 = time.time()
+              try:
+                  t = e.read_image(engines.imread(f))
+              except Exception as ex:
+                  t = f"ERROR {ex}"
+              print(f"\n=== {f} ({int(time.time()-t0)} s)\n{t}", flush=True)
+          P
+          echo "---- raw answers"; cat ai_debug.txt || true
