@@ -250,6 +250,44 @@ class Library:
             self.db.commit()
         return seq
 
+    def import_rows(self, work, rows, source="otzaria", commit=True):
+        """Import a sefer given as ready rows: [{"node", "chapter", "verse", "he", "en", "en_basic"}] (the Otzaria format:
+        headings become node / chapter, every line of text a passage). Returns the passage ids in order."""
+        title = work["title"]
+        ids = []
+        with self.lock:
+            self.delete_work(work["id"], commit=False)
+            self.db.execute("""INSERT OR REPLACE INTO works(id,title,he_title,category_path,top_category,sort_key,
+                section_names,authors,he_authors,comp_date,era,comp_place,description,imported_at,source)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?)""",
+                (work["id"], title, work.get("he_title") or title, work.get("category_path", ""), work.get("top_category", ""),
+                 json.dumps(work.get("sort_key") or sort_key(title)), json.dumps(work.get("section_names") or []),
+                 work.get("authors", ""), work.get("he_authors", ""), "", "", "", work.get("description", ""), source))
+            wc = Counter()
+            for seq, r in enumerate(rows, 1):
+                he, en = r.get("he") or "", r.get("en") or ""
+                plain_list = H.plain_words(he)
+                plain = " ".join(plain_list)
+                node, chapter, verse = r.get("node") or "", r.get("chapter") or "", str(r.get("verse") or seq)
+                ref = title + (", " + node if node else "") + (" " + chapter + ":" + verse if chapter else " " + verse)
+                cur = self.db.execute("""INSERT INTO passages(work_id,seq,node,chapter,verse,ref,he,en,he_plain,initials,finals,en_basic)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (work["id"], seq, node, chapter, verse, ref, he, en, plain,
+                                                       "".join(H.normalize_finals(w[0]) for w in plain_list),
+                                                       "".join(H.normalize_finals(w[-1]) for w in plain_list), r.get("en_basic") or None))
+                pid = cur.lastrowid
+                ids.append(pid)
+                if plain:
+                    self.db.execute("INSERT INTO fts_he(rowid,he_plain,he_skel) VALUES(?,?,?)",
+                                    (pid, plain, " ".join(skeleton(w) for w in plain_list)))
+                if en:
+                    self.db.execute("INSERT INTO fts_en(rowid,en) VALUES(?,?)", (pid, en))
+                wc.update(plain_list)
+            self._add_words(wc)
+            self.db.execute("UPDATE works SET n_passages=?, n_words=? WHERE id=?", (len(rows), sum(wc.values()), work["id"]))
+            if commit:
+                self.db.commit()
+        return ids
+
     def _add_words(self, wc, sign=1):
         for w, n in wc.items():
             self.db.execute("""INSERT INTO words(word,freq,g_std,g_gadol,g_katan,g_ord,skel) VALUES(?,?,?,?,?,?,?)

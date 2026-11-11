@@ -140,7 +140,7 @@ try {
     if (-not (Test-Path $zip)) { throw "zip missing" }
     & $Py -m PyInstaller --noconfirm --onefile --windowed --name "SeforimStudio-Setup" --icon (Join-Path $Root "web\icon.ico") `
         --add-data "$zip;." --add-data "$(Join-Path $Root 'web\icon.ico');." `
-        --distpath "$Work\setupdist" --workpath "$Work\setupbuild" --specpath "$Work" (Join-Path $Root "tools\setup_app.py")
+        --paths $Root --hidden-import core.installer --distpath "$Work\setupdist" --workpath "$Work\setupbuild" --specpath "$Work" (Join-Path $Root "tools\setup_app.py")
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
     Copy-Item "$Work\setupdist\SeforimStudio-Setup.exe" (Join-Path $Root "SeforimStudio-Setup.exe") -Force
     Write-Host "     Setup: $(Join-Path $Root 'SeforimStudio-Setup.exe')" -ForegroundColor Green

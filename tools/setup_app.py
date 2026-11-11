@@ -20,6 +20,12 @@ import sys
 import threading
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+try:
+    from core import installer as INST  # the same unpacking code the app uses
+except Exception:  # noqa
+    INST = None
+
 APP = "Seforim Studio"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
@@ -147,7 +153,7 @@ def copy_packs(dest, log=print):
     where the app installs them on first start - so the whole thing works on an offline computer."""
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
     n = 0
-    for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimAI.tar*")) + glob.glob(os.path.join(here, "SeforimMore.sqlite.xz*")):
+    for p in glob.glob(os.path.join(here, "SeforimLibrary.sqlite.xz*")) + glob.glob(os.path.join(here, "SeforimMore.sqlite.xz*")):
         if p.lower().endswith((".crdownload", ".partial", ".download", ".tmp", ".opdownload")):
             log(f"{os.path.basename(p)} has not finished downloading - skipped")
             continue
@@ -160,9 +166,63 @@ def copy_packs(dest, log=print):
     return n
 
 
-def run_all(dest, shortcuts=True, fonts=True, log=print, progress=lambda f: None, all_users=False):
+def install_ai(data_dir, log=print, progress=lambda f: None):
+    """Install the AI handwriting reader during Setup (no waiting when the app opens).
+    The 3 SeforimAI.tar.part files are taken from next to Setup, Downloads, Desktop or a USB stick."""
+    if INST is None:
+        return False
+    here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+    found = INST.scan(INST.search_dirs(here, data_dir, here), INST.PACKS["ai"])
+    parts = found["parts"]
+    if not parts:
+        if found["problem"]:
+            log("AI reader: " + found["problem"])
+        else:
+            log("AI reader files (SeforimAI.tar.part1of3 …) not found next to Setup or in Downloads - you can add them later.")
+        return False
+    if INST.already_installed(data_dir, parts, "ai") and os.path.isdir(os.path.join(data_dir, "ai", "models")):
+        log("AI handwriting reader is already installed")
+        return True
+    log("Installing the AI handwriting reader (5.6 GB, a few minutes)…")
+    INST.extract_tar(parts, data_dir, lambda f: progress(f))
+    INST.mark_installed(data_dir, parts, "ai")
+    log("AI handwriting reader installed ✓")
+    return True
+
+
+def install_library(data_dir, log=print, progress=lambda f: None):
+    """Unpack the complete library during Setup too (when this computer does not have it yet)."""
+    if INST is None:
+        return False
+    here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+    found = INST.scan(INST.search_dirs(here, data_dir, here), INST.PACKS["library"])
+    parts = found["parts"]
+    target = os.path.join(data_dir, "library.sqlite")
+    if not parts or INST.already_installed(data_dir, parts):
+        return False
+    if os.path.exists(target) and os.path.getsize(target) > 500 << 20:
+        return False  # a full library is already here (with the user's own seforim) - the app updates it safely
+    log("Installing the complete seforim library (a few minutes)…")
+    tmp = target + ".installing"
+    INST.decompress(parts, tmp, progress)
+    os.replace(tmp, target)
+    INST.mark_installed(data_dir, parts)
+    log("Seforim library installed ✓")
+    return True
+
+
+def run_all(dest, shortcuts=True, fonts=True, log=print, progress=lambda f: None, all_users=False, ai=True):
     shared = SHARED if all_users else None
     exe = install(dest, log, progress, shared)
+    try:
+        install_library(shared or os.path.join(dest, "data"), log, progress)
+    except Exception as e:  # noqa
+        log(f"(The library will be installed when the app starts: {e})")
+    if ai:
+        try:
+            install_ai(shared or os.path.join(dest, "data"), log, progress)
+        except Exception as e:  # noqa
+            log(f"(Could not install the AI reader now: {e} - the app will try again when it starts)")
     if copy_packs(shared or dest, log):
         log("Library / AI files copied - they install automatically when the app starts")
     if shortcuts:
