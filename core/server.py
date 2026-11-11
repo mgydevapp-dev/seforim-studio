@@ -61,6 +61,14 @@ class Jobs:
         return {k: v for k, v in j.items() if k != "cancel"} if j else {"error": "unknown job", "done": True}
 
 
+class _nolock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
 class App:
     def __init__(self, base_dir, data_dir=None, shared_dir=None):
         self.base = base_dir
@@ -385,7 +393,8 @@ class App:
     def api_library_health(self, a):
         """Per section of the library: how many seforim the catalog has and how many are installed with text."""
         if not self.catalog:
-            return {"rows": [], "total": 0, "have": 0, "install": self.install}
+            n = self.lib.q1("SELECT COUNT(*) n FROM works WHERE n_passages>0 AND source<>'user'")["n"]
+            return {"rows": [], "total": 0, "have": n, "install": self.install, "more": self.more, "library_ok": n >= 1000}
         cat = {r["top"]: r["n"] for r in self.catalog.q(
             "SELECT CASE WHEN instr(category_path,' > ')>0 THEN substr(category_path,1,instr(category_path,' > ')-1) "
             "ELSE category_path END AS top, COUNT(*) n FROM works GROUP BY top")}
@@ -402,7 +411,8 @@ class App:
         if self.install["state"] in ("idle", "missing", "incomplete", "error"):
             self.check_library_install()
         more_n = self.lib.q1("SELECT COUNT(*) n FROM works WHERE source='otzaria'")["n"]
-        return {"rows": rows, "total": sum(cat.values()), "have": sum(have.values()), "install": self.install, "more": self.more, "more_n": more_n,
+        library_ok = self.lib.q1("SELECT COUNT(*) n FROM works WHERE n_passages>0 AND source<>'user'")["n"] >= 1000
+        return {"rows": rows, "total": sum(cat.values()), "have": sum(have.values()), "install": self.install, "more": self.more, "more_n": more_n, "library_ok": library_ok,
                 "online_download": self.dl.state.get("running", False) if self.dl else False}
 
     def _cleanup_parts(self, parts):
@@ -543,30 +553,44 @@ class App:
         return s
 
     # ---- catalog / library browsing
+    def _tree_from_library(self, where="1"):
+        """The library shelves, made from the seforim themselves (their categories, in their order)."""
+        from .order import he_name
+        rows = self.lib.q(f"SELECT id, title, he_title, category_path, source FROM works WHERE n_passages>0 AND source<>'user' AND {where} "
+                       f"ORDER BY sort_key, title")
+        roots, index = [], {}
+        for w in rows:
+            parts = (w["category_path"] or "Other").split(" > ")
+            parent = None
+            for k in range(len(parts)):
+                path = " > ".join(parts[:k + 1])
+                if path not in index:
+                    nm = parts[k]
+                    hn = he_name(nm)
+                    node = {"name": nm, "he": hn if hn and hn != nm else nm, "path": path, "children": [], "works": [], "count": 0}
+                    index[path] = node
+                    (parent["children"] if parent else roots).append(node)
+                parent = index[path]
+            parent["works"].append({"id": w["id"], "title": w["title"], "he": w["he_title"] or w["title"], "has_he": True, "has_en": True})
+
+        def count(n):
+            n["count"] = len(n["works"]) + sum(count(c) for c in n["children"])
+            return n["count"]
+        for r in roots:
+            count(r)
+        return roots
+
     def api_catalog_tree(self, a):
-        if not self.catalog:
-            return {"tree": [], "imported": []}
-        tree = self.catalog.tree()
-        extra = self.lib.q("SELECT id, title, he_title, category_path FROM works WHERE source='otzaria' ORDER BY category_path, title")
-        if extra:
-            top = {"name": "More seforim", "he": "ספרים נוספים", "path": "More seforim", "children": [], "works": [], "count": 0}
-            index = {"More seforim": top}
-            for w in extra:
-                parts = (w["category_path"] or "More seforim").split(" > ")
-                node = top
-                for k in range(1, len(parts)):
-                    path = " > ".join(parts[:k + 1])
-                    if path not in index:
-                        child = {"name": parts[k], "he": parts[k], "path": path, "children": [], "works": [], "count": 0}
-                        node["children"].append(child)
-                        index[path] = child
-                    node = index[path]
-                node["works"].append({"id": w["id"], "title": w["title"], "he": w["he_title"] or w["title"], "has_he": True, "has_en": False})
-            def count(n):
-                n["count"] = len(n["works"]) + sum(count(c) for c in n["children"])
-                return n["count"]
-            count(top)
-            tree = tree + [top]
+        otz = self.lib.q1("SELECT COUNT(*) n FROM works WHERE source='otzaria'")["n"]
+        full = self.lib.q1("SELECT COUNT(*) n FROM works WHERE source<>'user' AND n_passages>0")["n"]
+        if otz and otz >= full * 0.5 or not self.catalog:
+            tree = self._tree_from_library()          # the Otzaria library: shelves as in Otzaria
+        else:
+            tree = self.catalog.tree()
+            if otz:
+                extra = self._tree_from_library("source='otzaria'")
+                tree = tree + [{"name": "More seforim", "he": "ספרים נוספים", "path": "More seforim", "children": extra,
+                                "works": [], "count": sum(n["count"] for n in extra)}]
         return {"tree": tree, "imported": [w["id"] for w in self.lib.q("SELECT id FROM works")],
                 "favorites": [r["work_id"] for r in self.user.list("favorites")],
                 "hidden": [r["work_id"] for r in self.user.list("hidden")]}
@@ -838,8 +862,15 @@ class App:
         w = self.lib.work(int(a["work_id"]))
         ch, node = a.get("chapter", ""), a.get("node", "")
         gem = [] if a.get("names_only") else self.lib.chapter(w["id"], node, ch)
-        comms = self.lib.q("SELECT id, title, he_title FROM works WHERE n_passages>0 AND (title LIKE ? OR title LIKE ?)",
-                           ("% on " + w["title"], "% on " + w["title"] + ",%"))
+        comms = self.lib.q("SELECT id, title, he_title FROM works WHERE n_passages>0 AND id<>? AND (title LIKE ? OR title LIKE ? OR he_title LIKE ?)",
+                           (w["id"], "% on " + w["title"], "% on " + w["title"] + ",%", "% על " + (w.get("he_title") or "\x00")))
+        # which Gemara line each comment explains, from the links (Otzaria's links go line to line)
+        base = f"{w['title']} {ch}:" if ch else f"{w['title']} "
+        anchor_of = {}
+        for l in self.lib.q("SELECT ref1, ref2 FROM links WHERE ref1>=? AND ref1<?", (base, base[:-1] + ";")):
+            anchor_of.setdefault(l["ref2"], l["ref1"][len(base):].split(":")[0])
+        for l in self.lib.q("SELECT ref1, ref2 FROM links WHERE ref2>=? AND ref2<?", (base, base[:-1] + ";")):
+            anchor_of.setdefault(l["ref1"], l["ref2"][len(base):].split(":")[0])
         first = {"Rashi": 0, "Tosafot": 1, "Rabbeinu Chananel": 2, "Ein Mishpat Ner Mitzvah": 8, "Mesorat HaShas": 9, "Torah Ohr": 10}
         out = []
         for c in comms:
@@ -850,9 +881,10 @@ class App:
                 rows = self.lib.q("SELECT id, ref, he, en, verse FROM passages WHERE work_id=? AND chapter=? ORDER BY seq", (c["id"], ch))
             if not rows:
                 continue
-            name = c["title"][:-len(" on " + w["title"])] if c["title"].endswith(" on " + w["title"]) else c["title"].split(" on ")[0]
+            name = c["title"][:-len(" on " + w["title"])] if c["title"].endswith(" on " + w["title"]) else \
+                (c["title"].split(" on ")[0] if " on " in c["title"] else (c["he_title"] or c["title"]).split(" על ")[0])
             for r in rows:
-                r["anchor"] = (r["verse"] or "").split(":")[0]
+                r["anchor"] = anchor_of.get(r["ref"]) or (r["verse"] or "").split(":")[0]
             hn = he_name(name)
             out.append({"title": name, "he_title": (hn if hn and hn != name else "") or (c["he_title"] or "").split(" על ")[0] or name,
                         "work_id": c["id"], "passages": rows})
@@ -958,7 +990,28 @@ class App:
         return r
 
     def api_ud_save(self, a):
-        return {"id": self.user.save(a["table"], a["row"])}
+        row = a["row"]
+        if a["table"] == "docs" and row.get("id"):
+            # keep the version before this save (the last 30), so an earlier text can be restored
+            try:
+                with self.user.lock if hasattr(self.user, "lock") else _nolock():
+                    self.user.db.execute("CREATE TABLE IF NOT EXISTS doc_versions(id INTEGER PRIMARY KEY, doc_id INT, html TEXT, saved_at TEXT)")
+                    old = self.user.db.execute("SELECT html FROM docs WHERE id=?", (row["id"],)).fetchone()
+                    if old and old[0] and old[0] != row.get("html"):
+                        self.user.db.execute("INSERT INTO doc_versions(doc_id, html, saved_at) VALUES(?,?,datetime('now','localtime'))", (row["id"], old[0]))
+                        self.user.db.execute("DELETE FROM doc_versions WHERE doc_id=? AND id NOT IN (SELECT id FROM doc_versions WHERE doc_id=? ORDER BY id DESC LIMIT 30)",
+                                             (row["id"], row["id"]))
+                    self.user.db.commit()
+            except Exception:
+                traceback.print_exc()
+        return {"id": self.user.save(a["table"], row)}
+
+    def api_note_versions(self, a):
+        try:
+            rows = self.user.db.execute("SELECT html, saved_at FROM doc_versions WHERE doc_id=? ORDER BY id DESC", (a["id"],)).fetchall()
+        except Exception:
+            return []
+        return [{"html": h, "saved_at": t, "words": len(re.sub(r"<[^>]+>", " ", h or "").split())} for h, t in rows]
 
     def api_ud_delete(self, a):
         self.user.delete(a["table"], a.get("key", "id"), a["value"])
@@ -1451,6 +1504,9 @@ class App:
 
     def api_open_folder(self, a):
         p = a.get("path") or self.data
+        if a.get("which") == "plugins":
+            p = os.path.join(self.data, "plugins")
+            os.makedirs(p, exist_ok=True)
         if not os.path.exists(p):
             return {"ok": False}
         if os.name == "nt":

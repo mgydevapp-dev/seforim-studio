@@ -56,7 +56,8 @@ The writing is often modern Hebrew CURSIVE script (כתב יד), not print lette
 Hebrew is written right to left: the first letter of each line is on the RIGHT.
 Rules:
 - Output only the transcription, in Hebrew letters. No translation, no explanation, no commentary.
-- Keep one output line for each handwritten line. Keep the original line breaks.
+- Keep one output line for each handwritten line, in the same order as on the page. Keep the original line breaks,
+  and an empty line where the page has a gap between paragraphs.
 - Do not correct spelling, do not complete words, do not add words that are not there.
 - Keep abbreviations and their marks (״ ׳ ") exactly; keep numbers and punctuation where they are.
 - If a word cannot be read, write [???] in its place.
@@ -170,7 +171,7 @@ class OllamaEngine:
                     n = sum(len(x) for x in text)
                     if progress and n - last > 15:
                         last = n
-                        progress("".join(text)[-60:].replace("\n", " "))
+                        progress("".join(text)[-60:].replace("\n", " "), n)
                 if j.get("done"):
                     break
         c = "".join(text)
@@ -281,7 +282,9 @@ class OllamaEngine:
                                   f"\n(This is part {i + 1} of {len(parts)} of a page; transcribe only what is visible.)"),
                                   "images": [_to_png_b64(part)]}]}
             req = urllib.request.Request(self.url + "/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
-            content = self._ask(body, (lambda t, i=i: progress(i, len(parts), "AI is writing: …" + t)) if progress else None)
+            expect = estimate_chars(part)
+            content = self._ask(body, (lambda t, n=0, i=i: progress(i + min(0.97, n / expect), len(parts),
+                                                                       f"AI is writing ({min(97, int(100 * n / expect))}%): …" + t)) if progress else None)
             texts.append(clean_transcription(content))
         return merge_strips(texts)
 
@@ -451,6 +454,21 @@ def _tessdata_with_script(exe):
         if f:
             shutil.copyfile(f, t)
     return d
+
+
+def estimate_chars(img):
+    """About how many letters the page holds: count the text lines (rows with ink), ~ letters per line from the width."""
+    try:
+        import cv2
+        import numpy as np
+        g = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        g = cv2.resize(g, (400, max(50, int(400 * g.shape[0] / g.shape[1]))))
+        ink = (cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 25, 15) > 0).mean(axis=1)
+        rows = ink > max(0.02, ink.mean() * 0.6)
+        lines = int(((rows[1:].astype(int) - rows[:-1].astype(int)) == 1).sum()) or 1
+        return max(40, lines * 32)
+    except Exception:
+        return 400
 
 
 # ====================================================================== is the text real Hebrew or random symbols?

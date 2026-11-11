@@ -39,7 +39,7 @@ const Scanner = {
         <div class="row"><b>Text</b><span class="small muted">— correct it here, right-to-left</span><span class="spacer"></span>
           <select id="scOrder" title="If Hebrew words come out backwards, choose 'Fix reversed'"><option value="auto">Word order: auto</option><option value="visual">Fix reversed Hebrew</option><option value="logical">Keep as is</option></select></div>
         <div class="sc-split"><div class="sc-img" id="scImg"><div class="muted small" style="padding:30px;text-align:center">The page appears here next to its text, so you can compare line by line.</div></div>
-        <textarea id="scOut" class="he-input" placeholder="The text appears here. Correct it, then save as Word."></textarea></div>
+        <textarea id="scOut" class="he-input" dir="rtl" spellcheck="false" style="text-align:right;unicode-bidi:plaintext;white-space:pre-wrap" placeholder="The text appears here. Correct it, then save as Word."></textarea></div>
         <div class="row"><button class="btn primary" id="scDocx">💾 Save as Word</button><button class="btn" id="scTxt">Save .txt</button><button class="btn" id="scCopy">Copy</button>
           <button class="btn" id="scNotes">→ Notes editor</button><button class="btn" id="scSefer">→ My Library</button>
           <button class="btn" id="scTrain" title="After correcting the text, save it as a sample to teach the reader this person's handwriting">🎓 Teach this handwriting</button></div>

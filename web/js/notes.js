@@ -26,6 +26,11 @@ const Notes = {
         <button data-a="date" title="Insert Hebrew date">📅</button><button data-a="gem" title="Gematria of selection">🔢</button><button data-a="ph" title="Mark unreadable [???] (Ctrl+Shift+?)">[?]</button>
         <button data-a="srcStyle" title="Source style (Ctrl+1)">מקור</button><button data-a="commStyle" title="Commentary style (Ctrl+2)">פירוש</button><button data-a="brackets" title="Colour (brackets) and [insertions]">( )</button>
         <button data-a="clean" title="Clean pasted formatting / Unicode">🧹</button><button data-a="find" title="Find & replace (Ctrl+H)">🔍</button><button data-a="desk" title="Transcription desk: image beside text">🖼</button>
+        <span class="tb-sep"></span><button data-a="table" title="Insert a table">▦</button><button data-a="tpl" title="Templates: shiur, chaburah, drasha, daf notes, letter…">📄</button>
+        <button data-a="cols" title="Two columns, like a sefer">⫼</button><button data-a="box" title="Box / highlighted section">▭</button>
+        <button data-a="abbr" title="Explain the abbreviations (ראשי תיבות) in the selection">ר״ת</button><button data-a="toc" title="Insert a table of contents">≣</button>
+        <button data-a="versions" title="Earlier versions of this note (restore)">🕘</button><button data-a="focus" title="Focus mode (Esc to leave)">🎯</button>
+        <button data-a="stats" title="Word count, reading time, gematria of the whole note">∑</button>
         <span class="spacer"></span><span class="small muted" id="edCount"></span>
       </div>
       <div class="ed-body">
@@ -170,6 +175,7 @@ const Notes = {
     let blk = sel.anchorNode; while (blk && blk !== this.page() && !/^(P|H\d|LI|BLOCKQUOTE|DIV)$/.test(blk.nodeName)) blk = blk.parentNode;
     if (blk && blk !== this.page()) { blk.classList.remove("src-style", "comm-style"); blk.classList.add(cls); this.changed(); }
   },
+  block() { const sel = getSelection(); if (!sel.rangeCount) return null; let n = sel.anchorNode; while (n && n !== this.page() && !(n.nodeType === 1 && /^(P|H[1-6]|LI|DIV|BLOCKQUOTE|TABLE)$/.test(n.tagName))) n = n.parentNode; return n && n !== this.page() ? n : null; },
   async action(a) {
     const page = this.page();
     const act = {
@@ -180,6 +186,55 @@ const Notes = {
       export: () => this.exportDialog(),
       print: () => { page.classList.add("print-area"); window.print(); setTimeout(() => page.classList.remove("print-area"), 400); },
       rtl: () => this.setDir("rtl"), ltr: () => this.setDir("ltr"),
+      table: async () => {
+        const v = await App.prompt("Table size: rows × columns", "3x3"); if (!v) return;
+        const [r, c] = v.split(/[x×*, ]+/).map(n => Math.max(1, Math.min(30, +n || 3)));
+        page.focus(); document.execCommand("insertHTML", false, `<table class="ed-table"><tbody>${Array.from({ length: r }, (_, i) => `<tr>${Array.from({ length: c }, () => i ? "<td><br></td>" : "<th><br></th>").join("")}</tr>`).join("")}</tbody></table><p><br></p>`);
+        this.changed();
+      },
+      tpl: () => {
+        const T = {
+          "Shiur notes": `<h1>שיעור — </h1><p><b>מגיד שיעור:</b> </p><p><b>תאריך:</b> ${esc(App.state.status && App.state.status.today_he || "")}</p><h2>מקורות</h2><ol><li><br></li></ol><h2>שאלה</h2><p><br></p><h2>תירוצים / שיטות</h2><ul><li><br></li></ul><h2>מסקנה</h2><p><br></p>`,
+          "Chaburah": `<h1>חבורה — </h1><h2>הקדמה</h2><p><br></p><h2>הקושיא</h2><p><br></p><h2>יסוד החילוק</h2><p><br></p><h2>ראיות</h2><ol><li><br></li></ol><h2>נפקא מינה</h2><p><br></p>`,
+          "Drasha": `<h1>דרשה — </h1><p class="muted">פתיחה · פסוק · קושיא · מהלך · משל · סיום</p><h2>פתיחה</h2><p><br></p><h2>הפסוק</h2><p><br></p><h2>הקושיא</h2><p><br></p><h2>המהלך</h2><p><br></p><h2>משל</h2><p><br></p><h2>סיום / חיזוק</h2><p><br></p>`,
+          "Daf notes": `<h1>מסכת  דף </h1><table class="ed-table"><tbody><tr><th>שקלא וטריא</th><th>רש״י</th><th>תוספות</th><th>הערות</th></tr><tr><td><br></td><td><br></td><td><br></td><td><br></td></tr></tbody></table><h2>חזרה</h2><ul><li><br></li></ul>`,
+          "Halacha summary": `<h1>הלכה — </h1><h2>מקור בגמרא</h2><p><br></p><h2>ראשונים</h2><ul><li><br></li></ul><h2>שו״ע ורמ״א</h2><p><br></p><h2>נושאי כלים / משנ״ב</h2><p><br></p><h2>להלכה</h2><p><br></p>`,
+          "Letter": `<p style="text-align:left">בס״ד</p><p style="text-align:left">${new Date().toLocaleDateString()}</p><p>לכבוד </p><p>שלום וברכה,</p><p><br></p><p>בברכה,</p><p><br></p>`,
+          "Sefer page (two columns)": `<h1 style="text-align:center">שם הספר</h1><div class="ed-cols"><p><br></p></div>`
+        };
+        App.modal(`<h3>Templates</h3>${Object.keys(T).map(k => `<button class="btn" data-t="${esc(k)}" style="display:block;width:100%;margin:4px 0;text-align:left">${esc(k)}</button>`).join("")}<div class="row" style="justify-content:flex-end"><button class="btn" data-close>Close</button></div>`, m => {
+          $$("[data-t]", m).forEach(b => b.onclick = () => { App.closeModal(); page.focus(); document.execCommand("insertHTML", false, T[b.dataset.t]); this.changed(); });
+        });
+      },
+      cols: () => { const blk = this.block(); if (!blk) return; const d = blk.closest(".ed-cols"); if (d) { d.replaceWith(...d.childNodes); } else { const w = document.createElement("div"); w.className = "ed-cols"; blk.replaceWith(w); w.appendChild(blk); } this.changed(); },
+      box: () => { const blk = this.block(); if (!blk) return; blk.classList.toggle("ed-box"); this.changed(); },
+      abbr: async () => {
+        const sel = String(getSelection()); if (!sel.trim()) return App.toast("Select some text first", true);
+        const r = await App.api("tool_run", { id: "expand_all", args: { text: sel } }).catch(() => null);
+        App.modal(`<h3>Abbreviations</h3><div class="he" style="white-space:pre-wrap;font-size:18px">${esc(typeof r === "string" ? r : r && (r.text || r.result) ? (r.text || r.result) : JSON.stringify(r || "Not found"))}</div><div class="row" style="justify-content:flex-end"><button class="btn" data-close>Close</button></div>`);
+      },
+      toc: () => {
+        const hs = $$("h1, h2, h3", page); if (!hs.length) return App.toast("Add headings first (Structure ▸ Heading)", true);
+        hs.forEach((h, i) => h.id = h.id || "h" + i);
+        const html = `<div class="ed-toc"><b>תוכן העניינים</b>${hs.map(h => `<div style="padding-inline-start:${(+h.tagName[1] - 1) * 16}px">${esc(h.textContent)}</div>`).join("")}</div><p><br></p>`;
+        page.focus(); const r = document.createRange(); r.setStart(page, 0); r.collapse(true); getSelection().removeAllRanges(); getSelection().addRange(r);
+        document.execCommand("insertHTML", false, html); this.changed();
+      },
+      versions: async () => {
+        if (!this.doc || !this.doc.id) return App.toast("Save the note first", true);
+        const vs = await App.api("note_versions", { id: this.doc.id }).catch(() => []);
+        App.modal(`<h3>Earlier versions</h3>${vs.length ? vs.map((v, i) => `<div class="list-item row"><span>${esc(v.saved_at)}</span><span class="small muted">${v.words} words</span><span class="spacer"></span><button class="btn small" data-v="${i}">Restore</button></div>`).join("") : `<p class="muted">No earlier versions yet — a version is kept every time you save.</p>`}<div class="row" style="justify-content:flex-end"><button class="btn" data-close>Close</button></div>`, m => {
+          $$("[data-v]", m).forEach(b => b.onclick = () => { App.closeModal(); page.innerHTML = vs[+b.dataset.v].html; this.changed(); App.toast("Restored — press Save to keep it"); });
+        });
+      },
+      focus: () => { document.body.classList.toggle("focus"); App.toast(document.body.classList.contains("focus") ? "Focus mode — Esc to leave" : "Focus mode off"); },
+      stats: async () => {
+        const t = page.innerText, words = (t.match(/\S+/g) || []).length, heb = (t.match(/[\u05D0-\u05EA]/g) || []).length;
+        const g = await App.api("gematria_value", { text: t.slice(0, 20000) }).catch(() => null);
+        App.modal(`<h3>This note</h3><table class="tbl"><tr><td>Words</td><td><b>${words.toLocaleString()}</b></td></tr><tr><td>Letters (Hebrew)</td><td>${heb.toLocaleString()}</td></tr><tr><td>Characters</td><td>${t.length.toLocaleString()}</td></tr>
+          <tr><td>Reading time</td><td>~${Math.max(1, Math.round(words / 180))} min</td></tr><tr><td>Speaking time (shiur pace)</td><td>~${Math.max(1, Math.round(words / 120))} min</td></tr>
+          <tr><td>Paragraphs</td><td>${$$("p", page).length}</td></tr>${g && g.methods ? `<tr><td>Gematria of all the Hebrew</td><td>${esc(String(Object.values(g.methods)[0]))}</td></tr>` : ""}</table><div class="row" style="justify-content:flex-end"><button class="btn" data-close>Close</button></div>`);
+      },
       nikud: () => this.nikudPalette(),
       chars: () => this.charsPalette(),
       fn: () => this.addFootnote(),

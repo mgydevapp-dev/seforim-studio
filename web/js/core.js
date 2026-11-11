@@ -236,16 +236,15 @@ const App = {
     document.addEventListener("mousemove", e => { if (drag) { cc.style.left = (e.clientX - drag[0]) + "px"; cc.style.top = (e.clientY - drag[1]) + "px"; cc.style.right = "auto"; } });
     document.addEventListener("mouseup", () => drag = null);
     document.addEventListener("keydown", e => { if (e.ctrlKey && e.shiftKey && (e.key === "C" || e.key === "c")) { const s = String(window.getSelection()); if (s) { e.preventDefault(); this.addClip(s, this.selectionRef()); } } });
-    // copy with automatic citation (book, chapter, verse + Sefaria link) when copying from the library
+    // copy with automatic citation (book, chapter, verse) when copying from the library
     document.addEventListener("copy", e => {
       if (this.state.settings.cite_on_copy === false) return;
       const sel = window.getSelection(); if (!sel || sel.isCollapsed) return;
       const ref = this.selectionRef(); if (!ref) return;
       const text = String(sel);
-      const link = this.sefariaLink(ref);
-      e.clipboardData.setData("text/plain", `${text}\n— ${ref}\n${link}`);
+      e.clipboardData.setData("text/plain", `${text}\n— ${ref}`);
       const div = document.createElement("div"); div.appendChild(sel.getRangeAt(0).cloneContents());
-      e.clipboardData.setData("text/html", `<div dir="${isHeb(text) ? "rtl" : "ltr"}">${div.innerHTML}</div><p style="color:#8a6d3b;font-size:smaller">— ${esc(ref)} · <a href="${link}">${link}</a></p>`);
+      e.clipboardData.setData("text/html", `<div dir="${isHeb(text) ? "rtl" : "ltr"}">${div.innerHTML}</div><p style="color:#8a6d3b;font-size:smaller">— ${esc(ref)} </p>`);
       e.preventDefault(); this.status("Copied with citation: " + ref);
     });
   },
@@ -267,7 +266,6 @@ const App = {
     return (heTitle + " " + part).trim();
   },
   both(en, he) { return he ? `${esc(en)} <span class="he-name">${esc(he)}</span>` : esc(en); },
-  sefariaLink(ref) { const m = ref.match(/^(.*?)\s+([\dab:\-]+)$/); const p = m ? m[1].replace(/ /g, "_") + "." + m[2].replace(/:/g, ".") : ref.replace(/ /g, "_"); return "https://www.sefaria.org/" + encodeURI(p); },
   copy(text, html) {
     if (html && window.ClipboardItem) return navigator.clipboard.write([new ClipboardItem({ "text/plain": new Blob([text], { type: "text/plain" }), "text/html": new Blob([html], { type: "text/html" }) })]).then(() => this.toast("Copied"));
     return navigator.clipboard.writeText(text).then(() => this.toast("Copied"), () => { const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); this.toast("Copied"); });

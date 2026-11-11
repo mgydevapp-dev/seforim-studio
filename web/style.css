@@ -369,3 +369,13 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
   .vilna .v-cols { column-count: 2 !important; }
   .vilna .hl-on { background: none !important; }
 }
+.code-box { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font: 12px/1.45 Consolas, monospace; white-space: pre; overflow: auto; max-height: 340px; direction: ltr; }
+.mz-par { font-family: var(--he-font); font-weight: 700; color: var(--accent); padding: 10px 8px 4px; border-bottom: 2px solid var(--accent-soft); }
+.mz-today { padding: 14px; }
+.ed-page table.ed-table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.ed-page table.ed-table td, .ed-page table.ed-table th { border: 1px solid var(--line); padding: 4px 8px; min-width: 40px; vertical-align: top; }
+.ed-page table.ed-table th { background: var(--panel2); }
+.ed-page .ed-cols { column-count: 2; column-gap: 28px; column-rule: 1px solid var(--line); }
+.ed-page .ed-box { border: 1.5px solid var(--accent); border-radius: 8px; padding: 8px 12px; background: var(--accent-soft); }
+.ed-page .ed-toc { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin: 6px 0 12px; }
+.tb-sep { display: inline-block; width: 1px; height: 20px; background: var(--line); margin: 0 4px; vertical-align: middle; }

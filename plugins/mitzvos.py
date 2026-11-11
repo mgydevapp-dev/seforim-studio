@@ -74,7 +74,49 @@ def detail(app, a):
     return {"title_he": item["he"], "title_en": item["en"], "ref": item["ref"], "sections": sections, "links": links}
 
 
-ROUTES = {"list": listing, "detail": detail}
+def chinukh(app, a):
+    """Sefer HaChinukh: the 613 mitzvos in the order of the parshiyos of the Torah."""
+    w = app.lib.q1("SELECT id FROM works WHERE title IN ('Sefer HaChinukh','ספר החינוך') OR he_title IN ('ספר החינוך','ספר החנוך') LIMIT 1")
+    if not w:
+        return {"missing": True, "groups": []}
+    rows = app.lib.q("SELECT node, chapter, ref, he, en FROM passages WHERE work_id=? ORDER BY seq", (w["id"],))
+    groups, seen = [], set()
+    for r in rows:
+        key = (r["node"], r["chapter"])
+        if key in seen:
+            continue
+        seen.add(key)
+        par = r["node"] or ""
+        if not groups or groups[-1]["parasha"] != par:
+            groups.append({"parasha": par, "items": []})
+        groups[-1]["items"].append({"n": r["chapter"], "ref": r["ref"], "he": _short(r["he"], 160), "en": _short(r["en"], 160)})
+    return {"groups": groups}
+
+
+def today(app, a):
+    """A mitzvah a day: positive and negative in turn, through all 613."""
+    import datetime as dt
+    d = dt.date.today().toordinal()
+    k = d % 613
+    kind, n = ("positive", k + 1) if k < 248 else ("negative", k - 247)
+    item = listing(app, {})[kind]
+    return {"kind": kind, "n": n, "item": item[n - 1] if len(item) >= n else None}
+
+
+def quiz(app, a):
+    import random
+    L = listing(app, {})
+    pool = [("positive", m) for m in L["positive"]] + [("negative", m) for m in L["negative"]]
+    if len(pool) < 4:
+        return {"missing": True}
+    kind, m = random.choice(pool)
+    others = random.sample([x for x in pool if x[1]["he"] != m["he"]], 3)
+    opts = [{"he": m["he"], "en": m["en"], "ok": True}] + [{"he": o[1]["he"], "en": o[1]["en"], "ok": False} for o in others]
+    random.shuffle(opts)
+    return {"kind": kind, "n": m["n"], "options": opts}
+
+
+ROUTES = {"list": listing, "detail": detail, "chinukh": chinukh, "today": today, "quiz": quiz}
 
 
 def home(app):
@@ -96,14 +138,53 @@ const MZ = {
           <button data-k="negative">⛔ מצוות לא תעשה<small>${L.negative.length} negative</small></button>
           <button data-k="rabbanan">📜 מצוות דרבנן<small>${L.rabbanan.length} rabbinic</small></button></div>
         <input id="mzQ" placeholder="Search a mitzvah… (e.g. Shabbos, תפילין, 25)" style="flex:1;min-width:200px">
-        <label class="tgl small"><input type="checkbox" id="mzEn" checked> English</label></div>
+        <label class="tgl small"><input type="checkbox" id="mzEn" checked> English</label>
+        <button class="btn small" id="mzPrint" title="Print this list">🖨 Print list</button></div>
+      <div class="row" style="gap:6px;margin-bottom:10px">
+        <button class="chip on" data-view="list">📋 By number (Rambam)</button><button class="chip" data-view="chinukh">📖 By parasha (Chinukh)</button>
+        <button class="chip" data-view="today">☀ Mitzvah of the day</button><button class="chip" data-view="quiz">❓ Test yourself</button>
+        <span class="small muted" style="margin-left:auto">248 positive = the limbs of the body · 365 negative = the days of the year</span></div>
       <div class="grid mz-grid"><div class="card mz-list" id="mzList"></div><div class="card" id="mzDet"><p class="muted">Choose a mitzvah to see its source in the Torah, the Rambam, the Chinukh and more.</p></div></div>`;
-    $$("#mzKind button", el).forEach(b => b.onclick = () => { this.kind = b.dataset.k; this.draw(); });
+    $$("#mzKind button", el).forEach(b => b.onclick = () => { this.kind = b.dataset.k; this.view = "list"; this.syncView(); this.draw(); });
+    $$("[data-view]", el).forEach(b => b.onclick = () => { this.view = b.dataset.view; this.syncView(); this.draw(); });
+    $("#mzPrint", el).onclick = () => { const w = $("#mzList", el).innerHTML; const f = document.createElement("iframe"); f.style.cssText = "position:fixed;width:0;height:0;border:0"; document.body.appendChild(f);
+      f.contentDocument.write(`<html dir="rtl"><head><meta charset="utf-8">${[...document.querySelectorAll("link[rel=stylesheet],style")].map(x => x.outerHTML).join("")}<style>body{background:#fff;padding:8mm}.mz-item{break-inside:avoid}</style></head><body><h2>תרי״ג מצוות</h2>${w}</body></html>`); f.contentDocument.close();
+      setTimeout(() => { f.contentWindow.print(); setTimeout(() => f.remove(), 1500); }, 500); };
     $("#mzQ", el).oninput = () => this.draw(); $("#mzEn", el).onchange = () => this.draw();
     this.el = el; this.draw();
   },
-  draw() {
+  syncView() { $$("[data-view]", this.el).forEach(b => b.classList.toggle("on", b.dataset.view === (this.view || "list"))); },
+  async draw() {
     const el = this.el, q = $("#mzQ", el).value.trim().toLowerCase(), en = $("#mzEn", el).checked;
+    const view = this.view || "list";
+    if (view === "chinukh") {
+      const c = this.ch = this.ch || await Plugins.call("mitzvos", "chinukh");
+      $("#mzList", el).innerHTML = c.missing ? `<p class="muted">Sefer HaChinukh is not in your library.</p>` : c.groups.map(g => {
+        const items = g.items.filter(m => !q || String(m.n) === q || (m.he + " " + m.en).toLowerCase().includes(q));
+        return items.length ? `<div class="mz-par">${esc(g.parasha || "")}</div>` + items.map(m => `<div class="mz-item" data-ref="${esc(m.ref)}"><span class="mz-n">חינוך<small>${esc(m.n)}</small></span><div><div class="he">${esc(m.he)}</div>${en && m.en ? `<div class="small muted">${esc(m.en)}</div>` : ""}</div></div>`).join("") : ""; }).join("");
+      $$(".mz-item", el).forEach(x => x.onclick = () => App.quickGo(x.dataset.ref));
+      return;
+    }
+    if (view === "today") {
+      const t = await Plugins.call("mitzvos", "today");
+      this.kind = t.kind; $$("#mzKind button", el).forEach(b => b.classList.toggle("on", b.dataset.k === this.kind));
+      $("#mzList", el).innerHTML = t.item ? `<div class="mz-today"><div class="small muted">Today's mitzvah · ${t.kind === "positive" ? "מצות עשה" : "מצות לא תעשה"} ${App.heNum(t.n)}</div><div class="he" style="font-size:26px;margin:8px 0">${esc(t.item.he)}</div>${en ? `<p>${esc(t.item.en)}</p>` : ""}<p class="small muted">A new mitzvah every day — through all 613 in the year and a half.</p></div>` : `<p class="muted">Install the full library.</p>`;
+      if (t.item) this.show(t.n);
+      return;
+    }
+    if (view === "quiz") {
+      const z = await Plugins.call("mitzvos", "quiz");
+      if (z.missing) { $("#mzList", el).innerHTML = `<p class="muted">Install the full library.</p>`; return; }
+      $("#mzList", el).innerHTML = `<div class="mz-today"><div class="small muted">Which is ${z.kind === "positive" ? "מצות עשה" : "מצות לא תעשה"} number</div><div style="font-size:40px;font-weight:700;color:var(--accent)">${App.heNum(z.n)} <small style="font-size:16px">(${z.n})</small></div>
+        ${z.options.map((o, i) => `<button class="btn mz-opt" data-i="${i}" style="display:block;width:100%;text-align:right;margin:6px 0"><span class="he">${esc(o.he)}</span>${en && o.en ? `<br><small class="muted">${esc(o.en)}</small>` : ""}</button>`).join("")}
+        <button class="btn primary" id="mzNext" style="margin-top:8px">Next question ›</button><span id="mzScore" class="small muted" style="margin-left:8px">${this.score ? `Score: ${this.score.ok}/${this.score.n}` : ""}</span></div>`;
+      this.score = this.score || { ok: 0, n: 0 };
+      $$(".mz-opt", el).forEach(b => b.onclick = () => { if (b.dataset.done) return; const o = z.options[+b.dataset.i];
+        this.score.n++; if (o.ok) this.score.ok++; $$(".mz-opt", el).forEach(x => { x.dataset.done = 1; const ok = z.options[+x.dataset.i].ok; if (ok) x.style.borderColor = "#2e7d32"; if (x === b && !ok) x.style.borderColor = "var(--danger)"; });
+        $("#mzScore", el).textContent = `${o.ok ? "✅ Right!" : "❌ Not this one"} · Score: ${this.score.ok}/${this.score.n}`; });
+      $("#mzNext", el).onclick = () => this.draw();
+      return;
+    }
     $$("#mzKind button", el).forEach(b => b.classList.toggle("on", b.dataset.k === this.kind));
     const label = { positive: "עשה", negative: "ל״ת", rabbanan: "דרבנן" }[this.kind];
     const items = this.L[this.kind].filter(m => !q || String(m.n) === q || (m.he + " " + m.en).toLowerCase().includes(q));

@@ -94,24 +94,18 @@ const Library = {
       clearTimeout(this._lh); this._lh = setTimeout(() => this.drawHealth(), 3000); this._wasMore = true; return;
     }
     if (this._wasMore) { this._wasMore = false; App.toast(h.more.message || "Extra seforim added"); return this.loadTree(); }
-    if (!h || !h.total || h.have >= h.total * 0.95) { el.innerHTML = ""; return; }
-    const st = h.install || {}, miss = h.rows.filter(r => r.have < r.total);
-    const running = st.state === "running";
+    if (!h || h.library_ok) { el.innerHTML = ""; return; }
+    const st = h.install || {}, running = st.state === "running";
     el.innerHTML = `<details class="lib-health" ${running || this._lhOpen ? "open" : ""}>
-      <summary><b>📚 ${h.have.toLocaleString()} of ${h.total.toLocaleString()} seforim installed</b> <span class="small">— ${running ? "installing…" : "get the rest ›"}</span></summary>
-      <div class="small">Missing: ${miss.map(r => `${esc(r.name)} <span class="heb">${esc(r.he || "")}</span> (${r.have}/${r.total})`).join(" · ")}</div>
+      <summary><b>📚 The complete library is not installed yet</b> <span class="small">— ${running ? "installing…" : "install it ›"}</span></summary>
       ${running ? `<div class="progress" style="height:10px;margin:6px 0"><div style="width:${st.progress || 0}%"></div></div>
         <div class="small">Installing the complete library… ${Math.round(st.progress || 0)}% — keep the app open.</div>`
       : `<div class="small lh-msg">${esc(st.message || "")}</div>
-      <div class="small">To get <b>everything</b> (Talmud, all seforim): download <b>both</b> files
-        <code>SeforimLibrary.sqlite.xz.part1of2</code> (1.99 GB) and <code>…part2of2</code> (0.35 GB) from the download page into your
-        <b>Downloads</b> folder (or onto the USB stick next to SeforimStudio-Setup.exe), then press <b>Install now</b>. About 11 GB of free disk space is needed.
-        ${h.more_n ? "" : `<br>➕ For <b>thousands more seforim</b> (Otzaria: Dicta, Torat Emet, Wikisource…) also download the <code>SeforimMore.sqlite.xz.part…</code> files — they are added automatically.`}</div>
+      <div class="small">Download <b>both</b> library files <code>SeforimLibrary.sqlite.xz.part1of2</code> and <code>…part2of2</code> into <b>Downloads</b>
+        (or onto the USB stick next to SeforimStudio-Setup.exe), then press <b>Install now</b>. About 15 GB of free disk space is needed.</div>
       <div class="row" style="gap:6px;margin-top:6px;flex-wrap:wrap">
         <button class="btn small primary" id="lhFind">Install now</button>
-        <input id="lhDir" data-pick="folder" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px">
-        <button class="btn small" id="lhNet" title="Needs internet (about 4 GB, roughly an hour)">Download missing from the internet</button>
-      </div>`}
+        <input id="lhDir" data-pick="folder" class="small" placeholder="…or the folder with the files, e.g. E:\\" style="flex:1;min-width:140px"></div>`}
     </details>`;
     $("details", el).ontoggle = e => { this._lhOpen = e.target.open; };
     if (running) { clearTimeout(this._lh); this._lh = setTimeout(() => this.drawHealth(), 2000); this._wasInstalling = true; return; }
@@ -121,14 +115,7 @@ const Library = {
       if (r.state === "running") return this.drawHealth();
       App.toast(r.message || "Library files not found", true); this.drawHealth();
     };
-    $("#lhNet").onclick = async () => {
-      if (!await App.confirm(`Download the ${(h.total - h.have).toLocaleString()} missing seforim from Sefaria now? This needs internet, about 4 GB and roughly an hour. You can keep using the app meanwhile.`)) return;
-      const cats = miss.map(r => r.name);
-      const r = await App.api("dl_start", { categories: cats, english: true, missing_only: true });
-      App.toast(r.started ? `Downloading ${r.count.toLocaleString()} seforim… (see Settings → Library for progress)` : (r.error || "A download is already running"));
-    };
   },
-  haveIn(n) { return n.works.filter(w => this.imported.has(w.id)).length + n.children.reduce((a, c) => a + this.haveIn(c), 0); },
   inCatalog(id) { const walk = ns => ns.some(n => n.works.some(w => w.id === id) || walk(n.children)); return this.tree ? walk(this.tree) : false; },
   drawTree() {
     const el = $("#libTree"); if (!el) return;
@@ -160,11 +147,7 @@ const Library = {
   },
   async clickWork(id, title) {
     if (this.imported.has(id)) return this.open(id);
-    if (await App.confirm(`"${title}" is not downloaded yet. Download it now? (Needs internet this one time; afterwards it works offline.)`)) {
-      await App.api("dl_start", { work_ids: [id], english: true });
-      App.toast("Downloading " + title + "…");
-      const iv = setInterval(async () => { const s = await App.api("dl_status"); if (!s.running) { clearInterval(iv); if (s.errors.length) App.toast(s.errors[0], true); await this.loadTree(); if (this.imported.has(id)) this.open(id); } }, 1500);
-    }
+    App.toast(`"${title}" is part of the complete library — install it from Library → "install it" (offline, from the downloaded files).`, true);
   },
   workMenu(id, title) {
     const fav = this.favorites.has(id), hid = this.hidden.has(id), on = this.imported.has(id);
@@ -341,7 +324,7 @@ const Library = {
         sheet: () => Sheets.addSource(p), clip: () => App.addClip((this.nk(p.he) || "") + (p.en ? "\n" + p.en : ""), p.ref),
         chz: async () => { if (!App.pages.chazara) return App.toast("Turn on the Chazara plugin (Plugins screen)", true);
           const r = await App.api("plugin_call", { id: "chazara", fn: "add", args: { ref: p.ref } }); App.toast(r.added ? "Added to Chazara — review it on the Chazara screen" : "Already in Chazara"); },
-        copy: () => App.copy(`${p.he || ""}\n${p.en || ""}\n— ${p.ref}\n${App.sefariaLink(p.ref)}`.replace(/\n\n/g, "\n"), `<p dir="rtl">${esc(p.he)}</p><p>${esc(p.en)}</p><p style="color:#8a6d3b">— ${esc(p.ref)}</p>`),
+        copy: () => App.copy(`${p.he || ""}\n${p.en || ""}\n— ${p.ref}`.replace(/\n\n/g, "\n"), `<p dir="rtl">${esc(p.he)}</p><p>${esc(p.en)}</p><p style="color:#8a6d3b">— ${esc(p.ref)}</p>`),
         comm: () => { this.view.comm = true; $("#rComm").checked = true; this.layoutPanes(); this.select(p.id, true); } })[act]?.();
     };
   },

@@ -121,14 +121,14 @@ jobs:
           $notes = @"
           **Seforim Studio - portable Windows app (no install, works offline)**
 
-          1. Download ALL the files below into ONE folder (e.g. Downloads, or a USB stick): **SeforimStudio-Setup.exe**, every **SeforimLibrary.sqlite.xz.part...** (the complete library) and every **SeforimAI.tar.part...** (the AI handwriting reader) and, for thousands more seforim, every **SeforimMore.sqlite.xz.part...**.
-          2. Double-click **SeforimStudio-Setup.exe** -> Install. It makes a Desktop shortcut, installs the Hebrew fonts into Windows (for Word too) and starts the app.
-          3. On first start the app finds the library and AI parts in Downloads and installs them once (a few minutes). Then you may delete the part files.
+          1. Download ALL the files below into ONE folder (e.g. Downloads, or a USB stick): **SeforimStudio-Setup.exe**, every **SeforimLibrary.sqlite.xz.part...** (the complete library) and every **SeforimAI.tar.part...** (the AI handwriting reader).
+          2. Double-click **SeforimStudio-Setup.exe** -> Install. Setup installs the app, the complete library and the AI handwriting reader in one go (a few minutes), makes a Desktop shortcut and installs the Hebrew fonts into Windows (for Word too).
+          3. Then you may delete the part files.
           4. For an OFFLINE computer: copy that same folder of files (USB stick) to it and double-click SeforimStudio-Setup.exe there - no internet needed. Or in the app: Settings > Backup > "Make the complete zip".
 
           (Alternative: SeforimStudio-Portable.zip - right-click it -> **Extract All** first; do not run the exe from inside the zip.)
 
-          Already inside the app: Hebrew titles of all seforim, 50+ Hebrew fonts, Tesseract Hebrew reader for the scanner.
+          Already inside the app: 50+ Hebrew fonts, the offline dictionary, and the print + cursive (כתב) readers for the scanner. The library is in the Otzaria format, with its commentaries and links.
           Built from commit ${{ github.sha }} - tested automatically on Windows.
           "@
           gh release view latest *> $null
@@ -149,8 +149,25 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Download every sefer + titles + cross-references into one library
-        run: python tools/prebuild_library.py --out build/library.sqlite --links --workers 24
+      - name: The English translations of the current library (attached to the same seforim)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download latest --pattern 'SeforimLibrary.sqlite.xz.part*' -D engparts --repo ${{ github.repository }}
+          cat $(ls engparts/* | sort) | xz -d -T0 > eng.sqlite; rm -rf engparts; ls -la eng.sqlite
+      - name: The Otzaria library (seforim + links)
+        run: |
+          git clone -q --depth 1 --filter=blob:none --sparse https://github.com/Sivan22/otzaria-library.git otz
+          cd otz && git sparse-checkout set "אוצריא" "links" && cd ..
+          echo "books: $(find otz/אוצריא -name '*.txt' | wc -l)  link files: $(ls otz/links | wc -l)"; du -sh otz/אוצריא otz/links
+          ls otz/links | head -3; head -c 600 "$(ls -d otz/links/* | head -1)"; echo
+          f=$(find otz/אוצריא -path '*בבלי*' -name '*.txt' | head -1); echo "$f"; head -12 "$f"
+      - name: Build the library in the Otzaria format
+        run: |
+          mkdir -p build
+          python tools/build_otzaria_library.py "otz/אוצריא" --links otz/links --english eng.sqlite --out build/library.sqlite
+          rm -f eng.sqlite
+          python -c "import sqlite3;c=sqlite3.connect('build/library.sqlite');print(c.execute('select count(*) from works').fetchone(), c.execute(\"select count(*) from passages where en<>''\").fetchone(), c.execute('select count(*) from links').fetchone()); [print(r) for r in c.execute(\"select ref,substr(he,1,40),substr(en,1,40) from passages where ref like 'Berakhot 2a:%' limit 4\")]" | tee build/library_report.txt
       - name: Compress and split (GitHub allows 2 GB per file)
         run: |
           cd build
@@ -167,7 +184,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view latest > /dev/null 2>&1 || gh release create latest --title "Seforim Studio - portable Windows app" --notes "Building…"
-          for a in $(gh release view latest --json assets -q '.assets[].name' | grep '^SeforimLibrary' || true); do gh release delete-asset latest "$a" -y; done
+          for a in $(gh release view latest --json assets -q '.assets[].name' | grep -E '^SeforimLibrary|^SeforimMore' || true); do gh release delete-asset latest "$a" -y; done
           gh release upload latest build/SeforimLibrary.sqlite.xz.part* build/library_report.txt --clobber
 
   bigtest:

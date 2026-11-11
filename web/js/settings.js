@@ -1,7 +1,7 @@
 /* Settings: library download (one-time), fonts, appearance & reading, location, privacy PIN, profiles, backup, developer API */
 const Settings = {
   render(el) {
-    el.innerHTML = `<h1 class="page-title">⚙ Settings</h1><div class="tabs" id="stTabs">${[["library", "📚 Library & download"], ["fonts", "🔤 Fonts"], ["appearance", "🎨 Appearance & location"], ["privacy", "🔒 Privacy & profiles"], ["backup", "💾 Backup"], ["dev", "🧩 Developer & about"]].map(([k, t]) => `<button data-t="${k}">${t}</button>`).join("")}</div><div id="stBody"></div>`;
+    el.innerHTML = `<h1 class="page-title">⚙ Settings</h1><div class="tabs" id="stTabs">${[["library", "📚 Library"], ["fonts", "🔤 Fonts"], ["appearance", "🎨 Appearance & location"], ["privacy", "🔒 Privacy & profiles"], ["backup", "💾 Backup"], ["plugins", "🧩 Plugins"], ["dev", "🛠 Developer & about"]].map(([k, t]) => `<button data-t="${k}">${t}</button>`).join("")}</div><div id="stBody"></div>`;
     $$("#stTabs button", el).forEach(b => b.onclick = () => this.tab(b.dataset.t));
     this.tab("library");
   },
@@ -35,56 +35,81 @@ const Settings = {
   },
   async t_library(el) {
     const st = await App.api("status"); App.state.status = st;
-    const tree = (await App.api("catalog_tree")).tree;
-    const count = n => n.works.length + n.children.reduce((a, c) => a + count(c), 0);
-    const rows = []; const walk = (ns, d) => ns.forEach(n => { rows.push({ path: n.path, name: n.name, he: n.he, d, n: count(n) }); if (d < 1) walk(n.children, d + 1); });
-    walk(tree, 0);
-    el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">Seforim catalog</h2>
-        ${st.catalog ? `<p>Loaded: <b>${st.catalog.works.toLocaleString()}</b> works · ${st.catalog.texts.toLocaleString()} text versions · ${st.catalog.categories.toLocaleString()} categories<br><span class="small muted">${esc(st.catalog.path)} · export ${esc(st.catalog.generated_at)}</span></p>` : "<p class='muted'>No catalog loaded.</p>"}
-        <button class="btn" id="stCat">Load a different catalog .db…</button>
-        <h2>Your offline library</h2><p><b>${st.library.works}</b> seforim · <b>${st.library.passages.toLocaleString()}</b> passages · ${st.library.words.toLocaleString()} distinct words · ${st.library.links.toLocaleString()} cross-references · ${st.library.size_mb} MB</p>
-        <h2>Pre-built full library</h2><p class="small">Downloaded <b>SeforimLibrary.sqlite.xz</b> (or its parts)? Put the file(s) in this app's folder or leave them in Downloads, then press the button. Your own notes and seforim are kept.</p>
-        <div class="row"><input id="stInstDir" data-pick="folder" placeholder="(optional) folder where the download is" style="flex:1"><button class="btn primary" id="stInst">📥 Install library download</button></div>
-        <p class="small" id="stInstMsg">${st.install && st.install.message ? esc(st.install.message) : ""}</p>
-        <h2>Hebrew names of seforim</h2><p class="small" id="stHe">…</p>
-        <div class="row"><button class="btn" id="stHeDl" title="Downloads ~116 MB once: exact Hebrew title, author and date of every sefer">⬇ Get exact Hebrew titles for all seforim (one time)</button></div>
-        <div class="row" style="margin-top:8px"><button class="btn" id="stCompact">Compact database</button><button class="btn" id="stFolder">Import from a Sefaria export folder (USB)…</button><button class="btn" id="stOpen">📂 Data folder</button></div></div>
-      <div class="card"><h2 style="margin-top:0">One-time download</h2>
-        <p class="small">Your catalog lists the texts; this downloads the Hebrew (and English) text of the sections you tick, once. <b>After that the app never needs internet.</b> Tip: start with Tanakh, Mishnah and Talmud; add more any time. You can also click a grey title in the Library to get just that sefer.</p>
-        <div style="max-height:320px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:6px">${rows.map(r => `<label class="row small" style="padding-left:${r.d * 22}px"><input type="checkbox" data-path="${esc(r.path)}"> ${esc(r.name)} <span class="he" style="font-size:14px">${esc(r.he || "")}</span><span class="muted">(${r.n})</span></label>`).join("")}</div>
-        <div class="row small" style="margin-top:6px"><label><input type="checkbox" id="dlEn" checked> Include English translations</label><label><input type="checkbox" id="dlLinks"> Cross-references (commentary links, ~800 MB download)</label></div>
-        <div class="row" style="margin-top:8px"><button class="btn primary" id="dlGo">⬇ Download & build library</button><button class="btn" id="dlStop">Stop</button></div>
-        <div class="progress" style="margin-top:8px"><div id="dlBar"></div></div><div class="small" id="dlStat"></div></div>
+    el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">Your library</h2>
+        <p><b>${st.library.works.toLocaleString()}</b> seforim · <b>${st.library.passages.toLocaleString()}</b> passages · ${st.library.words.toLocaleString()} distinct words · ${st.library.links.toLocaleString()} links between seforim · ${st.library.size_mb} MB</p>
+        <p class="small muted">The seforim, their names, order, commentaries and links come from the Otzaria library; English translations are shown beside the seforim that have one.</p>
+        <div class="row" style="margin-top:8px"><button class="btn" id="stCompact">Compact database</button><button class="btn" id="stOpen">📂 Data folder</button></div></div>
+      <div class="card"><h2 style="margin-top:0">Install the library</h2>
+        <p class="small">Downloaded the library files (<b>SeforimLibrary.sqlite.xz.part…</b>)? Leave them in Downloads, on the USB stick next to SeforimStudio-Setup.exe, or choose their folder, then press Install. Your own notes and seforim are kept.</p>
+        <div class="row"><input id="stInstDir" data-pick="folder" placeholder="(optional) folder where the download is" style="flex:1"><button class="btn primary" id="stInst">📥 Install library</button></div>
+        <p class="small" id="stInstMsg">${st.install && st.install.message ? esc(st.install.message) : ""}</p></div>
       <div class="card" style="grid-column:1/-1"><h2 style="margin-top:0">📍 Where the library and AI models are</h2><div id="stLoc" class="small">…</div></div></div>`;
     this.drawLocations();
-    $("#stCat").onclick = async () => { const u = await App.uploadPicked(".db,.sqlite,.sqlite3", false); if (!u.length) return; const r = await App.api("load_catalog", { upload: u[0].upload }); App.toast(`Catalog loaded: ${r.works} works`); Library.loadTree(); this.tab("library"); };
-    App.api("he_coverage").then(c => { if (c.works) $("#stHe").innerHTML = `<b>${c.with_hebrew.toLocaleString()}</b> of ${c.works.toLocaleString()} seforim already show their Hebrew name (built-in dictionary${c.official ? ` + ${c.official.toLocaleString()} official titles` : ""}). The one-time download below makes every title exact and adds authors & dates.`; });
     $("#stInst").onclick = async () => {
       const r = await App.api("install_check", { folder: $("#stInstDir").value.trim() || null });
       if (r.state === "running") return App.waitInstall();
-      $("#stInstMsg").textContent = r.message || (r.state === "idle" ? "No library download found. Looked in this app's folder, its data folder, Downloads and Desktop." : "Already installed.");
+      $("#stInstMsg").textContent = r.message || (r.state === "idle" ? "No library download found. Looked in this app's folder, its data folder, Downloads, Desktop and USB sticks." : "Already installed.");
     };
-    $("#stHeDl").onclick = async () => { const r = await App.api("dl_titles"); if (r.started) { App.toast("Downloading Hebrew titles…"); this.poll(); } else App.toast("Another download is running — try again when it finishes"); };
     $("#stCompact").onclick = async () => { App.toast("Compacting…"); const r = await App.api("compact"); App.toast(`Done — ${r.size_mb} MB`); };
     $("#stOpen").onclick = () => App.api("open_folder", {});
-    $("#stFolder").onclick = async () => { const p = await App.pickFolder("Choose the folder that contains the Sefaria export (with json\\ inside)"); if (!p) return; const { job } = await App.api("import_folder", { path: p }); const n = await App.job(job, s => $("#dlStat").textContent = "Importing…"); App.toast(`Imported ${n} seforim`); Library.loadTree(); this.tab("library"); };
-    $("#dlGo").onclick = async () => {
-      const cats = $$("[data-path]:checked", el).map(i => i.dataset.path); if (!cats.length) return App.toast("Tick at least one section");
-      const r = await App.api("dl_start", { categories: cats, english: $("#dlEn").checked, links: $("#dlLinks").checked });
-      App.toast(`Downloading ${r.count} seforim…`); this.poll();
-    };
-    $("#dlStop").onclick = () => App.api("dl_stop");
-    this.poll();
   },
-  async poll() {
-    clearInterval(this._p);
-    const tick = async () => {
-      const s = await App.api("dl_status"); if (!$("#dlBar")) return clearInterval(this._p);
-      $("#dlBar").style.width = (s.total ? 100 * s.done / s.total : 0) + "%";
-      $("#dlStat").innerHTML = s.total ? `${s.running ? "⏳" : "✔"} ${s.done}/${s.total} · ${esc(s.current || "")} · ${(s.bytes / 1e6).toFixed(1)} MB${s.errors.length ? ` · <span style="color:var(--danger)">${s.errors.length} problem(s): ${esc(s.errors.slice(-1)[0])}</span>` : ""}` : "";
-      if (!s.running) { clearInterval(this._p); if (s.total) { Library.loadTree(); App.state.status = await App.api("status"); } }
-    };
-    tick(); this._p = setInterval(tick, 1500);
+  async t_plugins(el) {
+    const list = await App.api("plugins").catch(() => []);
+    const ex = `PLUGIN = {"id": "hello", "name": "Hello", "icon": "👋", "version": "1.0",
+          "description": "My first Seforim Studio plugin"}
+
+from core.tools import tool          # optional: add a tool to the Tools screen
+
+def count_words(app, args):          # called from your page with Plugins.call("hello", "count", {...})
+    return {"n": len(args.get("text", "").split())}
+
+ROUTES = {"count": count_words}
+
+def home(app):                       # optional: a card on the Home screen
+    return {"title": "Hello", "html": "<p>Hello from my plugin!</p>"}
+
+@tool("My tools", "Reverse a word", "Writes a word backwards",
+      [{"name": "text", "label": "Word", "type": "text"}])
+def reverse_word(a, ctx=None):
+    return a.get("text", "")[::-1]
+
+PAGE_JS = r"""
+App.register("hello", { title: "Hello", icon: "👋", render(el) {
+  el.innerHTML = '<h1 class="page-title">👋 Hello</h1><textarea id="hT"></textarea><button class="btn" id="hB">Count</button><p id="hR"></p>';
+  document.getElementById("hB").onclick = async () => {
+    const r = await Plugins.call("hello", "count", { text: document.getElementById("hT").value });
+    document.getElementById("hR").textContent = r.n + " words";
+  };
+} });
+"""`;
+    el.innerHTML = `<div class="grid g2">
+      <div class="card"><h2 style="margin-top:0">🧩 Load a plugin</h2>
+        <p class="small">A plugin is a <b>.py</b> file, or a <b>.zip</b> with a folder that has <code>plugin.py</code> in it (plus a <code>page.js</code> or other files if it needs them). It works offline, like the rest of the app.</p>
+        <div class="row"><button class="btn primary" id="spLoad">📂 Load a plugin file (.py / .zip)…</button><button class="btn" id="spOpen">Open the plugins folder</button></div>
+        <h3>Installed</h3>${(list || []).map(p => `<div class="list-item row"><span>${esc(p.icon || "🧩")}</span><b>${esc(p.name)}</b><span class="small muted">${esc(p.version || "")} ${p.builtin ? "· built in" : ""} ${p.error ? `· <span style="color:var(--danger)">${esc(p.error)}</span>` : ""}</span><span class="spacer"></span><span class="badge ${p.enabled ? "good" : ""}">${p.enabled ? "on" : "off"}</span></div>`).join("") || `<p class="muted small">None</p>`}
+        <p class="small">Turn plugins on/off or remove them on the <a href="#" id="spPage">Plugins screen</a>.</p></div>
+      <div class="card"><h2 style="margin-top:0">📘 How to build a plugin</h2>
+        <ol class="small" style="line-height:1.7">
+          <li>Make a new text file named e.g. <code>hello.py</code> (any name, letters and _ only).</li>
+          <li>At the top put <code>PLUGIN = {...}</code> with an <b>id</b>, <b>name</b>, <b>icon</b>, <b>version</b> and <b>description</b>.</li>
+          <li>Add what you need — all optional:
+            <ul><li><b>ROUTES</b> = {"name": function(app, args)} — Python the page can call with <code>Plugins.call(id, name, args)</code>. <code>app.lib</code> is the library (search, passages, gematria…), <code>app.pget / app.pset</code> save your plugin's data.</li>
+            <li><b>PAGE_JS</b> = a screen of your own: <code>App.register(id, { title, icon, render(el) {…} })</code> — it appears in the menu under Add-ons.</li>
+            <li><b>home(app)</b> — returns a card for the Home screen.</li>
+            <li><b>@tool(...)</b> — a tool in the Tools screen (inputs: text / number / date / select).</li></ul></li>
+          <li>Save it, press <b>Load a plugin file</b> above and choose it. Done — the app reloads with your plugin.</li>
+          <li>For several files: put <code>plugin.py</code> (+ <code>page.js</code>, pictures, data) in a folder, zip the folder, load the .zip.</li>
+          <li>To share it: send the .py / .zip to a friend; they load it the same way. Errors show in the list on the left.</li></ol>
+        <details><summary class="small">Full example (copy it)</summary><pre class="code-box" id="spEx"></pre><button class="btn small" id="spCopy">Copy example</button>
+          <button class="btn small" id="spSave">Save example as hello.py</button></details>
+        <p class="small muted">The built-in add-ons (Daily Learning, Chazara, Tehillim, Word Study, 613 Mitzvos) are written exactly this way — open the plugins folder to read them.</p></div></div>`;
+    $("#spEx", el).textContent = ex;
+    $("#spCopy", el).onclick = () => { navigator.clipboard.writeText(ex); App.toast("Copied"); };
+    $("#spSave", el).onclick = () => App.saveData(ex, "hello.py");
+    $("#spLoad", el).onclick = async () => { const u = await App.uploadPicked(".py,.zip", false); if (!u.length) return;
+      const r = await App.api("plugin_install", { upload: u[0].upload }); App.toast(r.error ? "Problem: " + r.error : "Loaded " + r.name + " — reloading…", !!r.error); if (!r.error) setTimeout(() => location.reload(), 900); };
+    $("#spOpen", el).onclick = () => App.api("open_folder", { which: "plugins" });
+    $("#spPage", el).onclick = e => { e.preventDefault(); App.show("plugins"); };
   },
   async t_fonts(el) {
     await App.loadFonts();
@@ -164,7 +189,7 @@ const Settings = {
   },
   async t_dev(el) {
     const st = await App.api("status");
-    el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">About</h2><p><b>Seforim Studio</b> ${esc(st.version)} — fully offline. Texts from the Sefaria export (see each text's license). ${st.tools} Hebrew tools.</p>
+    el.innerHTML = `<div class="grid g2"><div class="card"><h2 style="margin-top:0">About</h2><p><b>Seforim Studio</b> ${esc(st.version)} — fully offline. Seforim from the Otzaria library (see each sefer's source and license). ${st.tools} Hebrew tools.</p>
       <p class="small">Data folder: <code>${esc(st.data_dir)}</code></p><button class="btn" id="dvOpen">📂 Open data folder</button> <button class="btn danger" id="dvQuit">Quit app</button></div>
       <div class="card"><h2 style="margin-top:0">Developer access</h2><p class="small">Local API (only from this computer): <code>POST ${location.origin}/api/&lt;name&gt;</code> with header <code>X-Token</code>. Examples: <code>search</code> {q, lang, opts}, <code>gematria_words</code> {text}, <code>lib_chapter</code> {work_id, node, chapter}, <code>tool_run</code> {id, args}.</p>
       <p class="small">The library is a standard SQLite file (<code>data/library.sqlite</code>) you can open in any SQL tool; any sefer exports to JSON, CSV, TEI-XML, EPUB or SQLite.</p>
