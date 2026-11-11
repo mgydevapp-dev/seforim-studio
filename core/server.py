@@ -876,7 +876,7 @@ class App:
         for c in comms:
             if a.get("names_only"):
                 n = self.lib.q1("SELECT COUNT(*) n FROM passages WHERE work_id=? AND chapter=?", (c["id"], ch))["n"]
-                rows = [{"verse": ""}] * n
+                rows = [{"verse": ""} for _ in range(n)]
             else:
                 rows = self.lib.q("SELECT id, ref, he, en, verse FROM passages WHERE work_id=? AND chapter=? ORDER BY seq", (c["id"], ch))
             if not rows:
@@ -884,7 +884,7 @@ class App:
             name = c["title"][:-len(" on " + w["title"])] if c["title"].endswith(" on " + w["title"]) else \
                 (c["title"].split(" on ")[0] if " on " in c["title"] else (c["he_title"] or c["title"]).split(" על ")[0])
             for r in rows:
-                r["anchor"] = anchor_of.get(r["ref"]) or (r["verse"] or "").split(":")[0]
+                r["anchor"] = anchor_of.get(r.get("ref")) or (r.get("verse") or "").split(":")[0]
             hn = he_name(name)
             out.append({"title": name, "he_title": (hn if hn and hn != name else "") or (c["he_title"] or "").split(" על ")[0] or name,
                         "work_id": c["id"], "passages": rows})
