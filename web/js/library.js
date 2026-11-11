@@ -502,9 +502,32 @@ const Library = {
     const f = document.createElement("iframe"); f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0"; document.body.appendChild(f);
     const css = [...document.querySelectorAll("style, link[rel=stylesheet]")].map(x => x.outerHTML).join("");
     f.contentDocument.open();
-    f.contentDocument.write(`<!doctype html><html dir="rtl" style="${esc(document.documentElement.getAttribute("style") || "")}"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>html,body{width:auto}body{background:#fff!important;color:#000;margin:0;padding:6mm;min-width:900px}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}@media print{body *{visibility:visible!important}}</style></head><body><div class="print-area" style="position:static">${html}</div></body></html>`);
+    f.contentDocument.write(`<!doctype html><html dir="rtl" style="${esc(document.documentElement.getAttribute("style") || "")}"><head><meta charset="utf-8"><title>${esc(title)}</title>${css}<style>html,body{width:auto}body{background:#fff!important;color:#000;margin:0;padding:6mm;min-width:900px}.vilna{box-shadow:none;border:0;max-width:none;background:#fff}.vilna .hl-on{background:none}@page{size:A4;margin:8mm}@media print{body *{visibility:visible!important}}
+/* a printed daf always looks like a regular Vilna page, whatever size is set on the screen */
+.vilna{max-width:none!important;padding:0!important;border:0!important}
+.vilna .v-top{grid-template-columns:.34fr 1fr 1.55fr 1fr .34fr!important;gap:9pt!important}
+.vilna .v-gem{font-size:11.5pt!important;line-height:1.55!important}
+.vilna .v-side,.vilna .v-more,.vilna .v-cols{font-size:8.3pt!important;line-height:1.45!important}
+.vilna .v-marg{font-size:6.3pt!important;line-height:1.3!important}
+.vilna .v-head{font-size:9pt!important}.vilna .v-hdr{font-size:11pt!important}
+.vilna .v-first{font-size:22pt!important}.v-trans{font-size:10pt!important}
+.v-link{display:none!important}</style></head><body><div class="print-area" style="position:static">${html}</div></body></html>`);
     f.contentDocument.close();
-    setTimeout(() => { f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000); }, 600);
+    setTimeout(() => {
+      // lay Rashi and Tosafos out again at the printed size: beside the Gemara first, the rest underneath
+      const d = f.contentDocument, gem = d.querySelector(".v-gem");
+      if (gem) {
+        f.style.width = "1050px"; f.style.height = "1400px";
+        for (const cls of ["v-rashi", "v-tos"]) {
+          const side = d.querySelector(".v-top ." + cls), more = d.querySelector(".v-bottom ." + cls);
+          if (!side || !more) continue;
+          [...more.querySelectorAll(".cm")].forEach(c => side.appendChild(c));
+          const h = gem.offsetHeight + 20, spans = [...side.querySelectorAll(".cm")];
+          while (side.offsetHeight > h && spans.length) more.prepend(spans.pop());
+        }
+      }
+      f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000);
+    }, 700);
   },
   find(q) {
     $$(".psg").forEach(p => p.style.display = "");
