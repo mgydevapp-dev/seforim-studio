@@ -116,6 +116,7 @@ const Library = {
       App.toast(r.message || "Library files not found", true); this.drawHealth();
     };
   },
+  haveIn(n) { return n.works.filter(w => this.imported.has(w.id)).length + n.children.reduce((a, c) => a + this.haveIn(c), 0); },
   inCatalog(id) { const walk = ns => ns.some(n => n.works.some(w => w.id === id) || walk(n.children)); return this.tree ? walk(this.tree) : false; },
   drawTree() {
     const el = $("#libTree"); if (!el) return;
