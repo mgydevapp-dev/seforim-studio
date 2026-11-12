@@ -187,12 +187,12 @@ const Library = {
     App.show("library");
     const r = await App.api("lib_toc", { work_id });
     let idx = this.tabs.findIndex(t => t.work_id === work_id);
-    const t = { work_id, title: r.work.title, he_title: r.work.he_title, toc: r.toc, node: node ?? r.toc[0]?.node ?? "", chapter: chapter ?? r.toc[0]?.chapter ?? "", focus: passageId, sections: JSON.parse(r.work.section_names || "[]") };
+    const t = { work_id, title: r.work.title, he_title: r.work.he_title, toc: r.toc, node: node ?? r.toc[0]?.node ?? "", chapter: chapter ?? r.toc[0]?.chapter ?? "", focus: passageId, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx };
     if (idx >= 0 && !newTab) this.tabs[idx] = t; else if (this.tabs.length && !newTab && this.activeIdx >= 0) { idx = this.activeIdx; this.tabs[idx] = t; } else { this.tabs.push(t); idx = this.tabs.length - 1; }
     this.activeIdx = idx; this.drawTabs(); await this.loadChapter(); App.saveSession();
   },
   async restore(sess) {
-    for (const s of sess.tabs) { try { const r = await App.api("lib_toc", { work_id: s.work_id }); if (r.work) this.tabs.push({ ...s, he_title: r.work.he_title, toc: r.toc, sections: JSON.parse(r.work.section_names || "[]") }); } catch (e) { } }
+    for (const s of sess.tabs) { try { const r = await App.api("lib_toc", { work_id: s.work_id }); if (r.work) this.tabs.push({ ...s, he_title: r.work.he_title, toc: r.toc, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx }); } catch (e) { } }
     this.activeIdx = Math.min(sess.active || 0, this.tabs.length - 1);
     if (this.tabs.length && $("#bookTabs")) { this.drawTabs(); this.loadChapter(); }
   },
@@ -282,12 +282,22 @@ const Library = {
       if (key !== lastCh) { html += `<div class="chapter-title">${t.he_title ? `<span class="he">${esc(t.he_title)}</span> · ` : ""}${esc(t.title)} · ${esc(this.chapterLabel(t, { chapter: p.chapter, node: p.node }))}${p.node ? ` <div class="small muted">${esc(p.node)}</div>` : ""}</div>`; lastCh = key; }
       html += this.psgHtml(p, t);
     }
-    el.innerHTML = `<div class="comm-bar" id="rChips"></div>` + html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
+    el.innerHTML = this.translationNote(t) + `<div class="comm-bar" id="rChips"></div>` + html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
     $("#rNext2").onclick = () => this.step(1);
     this.drawCommChips(t, cur);
     if (this.view.tr === "inter") this.fillInter(el);
     this.bindPassages(el, t);
     if (this.selected) { const s = $(`.psg[data-id="${this.selected}"]`, el); if (s) s.classList.add("sel"); }
+  },
+  /* say plainly what translation this sefer has */
+  translationNote(t) {
+    const tr = this.view.tr || "full", m = this.view.mode;
+    if (m === "he") return "";
+    let msg = "";
+    if (t.has_en === false && tr !== "inter") msg = "ⓘ This sefer has no English translation (none exists in the free libraries). For help reading it, choose <b>Interlinear</b> (each word's meaning) or use 🌐 Translate.";
+    else if (t.has_en && tr === "basic" && !t.has_basic) msg = "ⓘ This sefer's translation is not divided into literal words and explanation, so <b>basic</b> shows the full translation.";
+    else if (t.has_en && t.en_approx && tr !== "inter") msg = "ⓘ This translation was made for a differently divided text: it is placed beside the Hebrew by length, so it can be a line or two off.";
+    return msg ? `<div class="tr-note small">${msg}</div>` : "";
   },
   /* interlinear: every Hebrew word with its English meaning under it */
   async fillInter(el) {

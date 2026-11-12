@@ -385,3 +385,4 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
 .ai-box .progress > div { background: #b8892b; height: 100%; }
 [data-theme="dark"] .ai-box { background: #3a3010; color: #f3e6bf; border-color: #8a6d1f; }
 [data-theme="dark"] .ai-box.ok { background: #1f3315; color: #cfe8b8; }
+.tr-note { border: 1px solid var(--line); border-left: 3px solid #e0b84f; background: var(--panel2); border-radius: 8px; padding: 6px 10px; margin: 0 0 10px; }

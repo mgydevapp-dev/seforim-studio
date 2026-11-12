@@ -93,11 +93,11 @@ def attach_english(rows, src_db, wid):
     for r in src_db.execute("SELECT chapter, verse, he_plain, en, en_basic FROM passages WHERE work_id=? AND en != '' ORDER BY seq", (wid,)):
         by_ch.setdefault(r["chapter"], []).append(r)
     if not by_ch:
-        return 0
+        return 0, False
     mine = {}
     for i, r in enumerate(rows):
         mine.setdefault(r["chapter"], []).append(i)
-    n = 0
+    n, approx = 0, False
     for ch, idx in mine.items():
         src = by_ch.get(ch)
         if not src:
@@ -108,6 +108,7 @@ def attach_english(rows, src_db, wid):
                 n += 1
             continue
         # proportional spread by Hebrew length
+        approx = True
         tot_a = sum(len(rows[i]["he"]) for i in idx) or 1
         tot_b = sum(len(s["he_plain"] or "") for s in src) or 1
         pos_a, cum = [], 0
@@ -125,7 +126,7 @@ def attach_english(rows, src_db, wid):
                 rows[i]["en"] = " ".join(x["en"] for x in ss)
                 rows[i]["en_basic"] = " ".join(x["en_basic"] for x in ss if x["en_basic"]) or None
                 n += 1
-    return n
+    return n, approx
 
 
 def main():
@@ -166,11 +167,14 @@ def main():
             k = (r["node"], r["chapter"])
             seen[k] = seen.get(k, 0) + 1
             r["verse"] = seen[k]
+        desc = ""
         if known and src is not None:
-            n_en += attach_english(rows, src, known["id"]) > 0
+            got, approx = attach_english(rows, src, known["id"])
+            n_en += got > 0
+            desc = "[approx-en]" if approx and got else ""
         work = {"id": wid, "title": title, "he_title": he_title, "top_category": top,
                 "category_path": " > ".join([top] + cats[1:]) if cats else top,
-                "sort_key": sort_key(title) if known else [9, cats, he_title]}
+                "sort_key": sort_key(title) if known else [9, cats, he_title], "description": desc}
         ids = lib.import_rows(work, rows, commit=(i % 50 == 0))
         for r, pid in zip(rows, ids):
             line_ref[(stem, r["line"])] = pid

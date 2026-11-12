@@ -671,6 +671,11 @@ class App:
 
     def api_lib_toc(self, a):
         w = self.lib.work(a["work_id"])
+        if w:
+            wid = w["id"]
+            w["has_en"] = bool(self.lib.q1("SELECT 1 x FROM passages WHERE work_id=? AND en<>'' LIMIT 1", (wid,)))
+            w["has_basic"] = bool(self.lib.q1("SELECT 1 x FROM passages WHERE work_id=? AND en_basic IS NOT NULL AND en_basic<>'' LIMIT 1", (wid,)))
+            w["en_approx"] = "[approx-en]" in (w.get("description") or "")
         return {"work": w, "toc": self.lib.toc(a["work_id"])}
 
     def api_lib_chapter(self, a):
