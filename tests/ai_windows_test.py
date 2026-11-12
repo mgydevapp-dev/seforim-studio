@@ -34,6 +34,7 @@ for f in os.listdir(PARTS):
         shutil.move(os.path.join(PARTS, f), os.path.join(inst, f))  # works across drives (C: / D:)
 say("AI files in the app folder: " + ", ".join(sorted(f for f in os.listdir(inst) if f.startswith("SeforimAI"))))
 
+DEBUG = os.path.join(OUT, "ai_debug.txt")
 proc = subprocess.Popen([exe, "--no-window", "--port", str(PORT)], cwd=inst, env={**os.environ, "SEFORIM_AI_DEBUG": DEBUG})
 tok = None
 for _ in range(90):
