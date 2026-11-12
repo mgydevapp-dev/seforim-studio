@@ -59,6 +59,7 @@ Rules:
 - Keep one output line for each handwritten line, in the same order as on the page. Keep the original line breaks,
   and an empty line where the page has a gap between paragraphs.
 - Do not correct spelling, do not complete words, do not add words that are not there.
+- Do NOT add nikud (vowel points) or cantillation marks that are not written on the page.
 - Keep abbreviations and their marks (״ ׳ ") exactly; keep numbers and punctuation where they are.
 - If a word cannot be read, write [???] in its place.
 - Ignore printed ruled lines, page numbers and stains."""
@@ -285,6 +286,8 @@ class OllamaEngine:
             expect = estimate_chars(part)
             content = self._ask(body, (lambda t, n=0, i=i: progress(i + min(0.97, n / expect), len(parts),
                                                                        f"AI is writing ({min(97, int(100 * n / expect))}%): …" + t)) if progress else None)
+            if not getattr(self, "keep_nikud", False):
+                content = re.sub(r"[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]", "", content)  # handwriting has no nikud
             texts.append(clean_transcription(content))
         return merge_strips(texts)
 
