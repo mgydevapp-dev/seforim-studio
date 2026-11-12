@@ -27,16 +27,13 @@ inst = os.path.join(os.environ.get("RUNNER_TEMP", os.path.expanduser("~")), "Sef
 subprocess.run([SETUP, "--silent", "--dir", inst, "--no-launch", "--no-shortcuts", "--no-fonts"], check=True)
 say(f"Installed app with Setup into {inst}")
 exe = os.path.join(inst, "SeforimStudio.exe")
-# the app looks for the AI pack in its own folder and in Downloads - put the parts in Downloads like a user
-dl = os.path.join(os.path.expanduser("~"), "Downloads")
-os.makedirs(dl, exist_ok=True)
+# like a user: the 3 AI files go into the app folder (where SeforimStudio.exe is)
+import shutil
 for f in os.listdir(PARTS):
     if f.startswith("SeforimAI.tar"):
-        import shutil
-        shutil.move(os.path.join(PARTS, f), os.path.join(dl, f))  # works across drives (C: / D:)
-say("AI pack parts in Downloads: " + ", ".join(sorted(f for f in os.listdir(dl) if f.startswith("SeforimAI"))))
+        shutil.move(os.path.join(PARTS, f), os.path.join(inst, f))  # works across drives (C: / D:)
+say("AI files in the app folder: " + ", ".join(sorted(f for f in os.listdir(inst) if f.startswith("SeforimAI"))))
 
-DEBUG = os.path.join(OUT, "ai_debug.txt")
 proc = subprocess.Popen([exe, "--no-window", "--port", str(PORT)], cwd=inst, env={**os.environ, "SEFORIM_AI_DEBUG": DEBUG})
 tok = None
 for _ in range(90):
@@ -54,6 +51,7 @@ def api(name, timeout=120, **a):
 
 
 t0 = time.time()
+api("ai_check", force=True)  # = pressing "Install AI pack"
 while True:
     st = api("ai_status")
     if st["state"] not in ("running",):

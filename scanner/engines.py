@@ -257,7 +257,7 @@ class OllamaEngine:
         except Exception:
             vis = None
         if vis is None:
-            return False, "AI pack not installed - download the SeforimAI.tar.part files into Downloads and press 'Install AI pack'"
+            return False, "AI pack not installed - put the 3 SeforimAI.tar.part files in the app folder and press 'Install AI pack'"
         if not vis:
             return False, "Ollama is running but no vision model is installed. Run: ollama pull qwen3-vl:8b"
         return True, f"model {self.pick_model()}"
