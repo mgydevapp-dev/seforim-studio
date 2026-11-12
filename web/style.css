@@ -379,3 +379,9 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
 .ed-page .ed-box { border: 1.5px solid var(--accent); border-radius: 8px; padding: 8px 12px; background: var(--accent-soft); }
 .ed-page .ed-toc { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; margin: 6px 0 12px; }
 .tb-sep { display: inline-block; width: 1px; height: 20px; background: var(--line); margin: 0 4px; vertical-align: middle; }
+.ai-box { border: 1px solid #e0b84f; background: #fff8e1; color: #4a3b10; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+.ai-box.ok { border-color: #8bc34a; background: #f1f8e9; color: #2e5e14; }
+.ai-box code { font-size: 11px; background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; word-break: break-all; }
+.ai-box .progress > div { background: #b8892b; height: 100%; }
+[data-theme="dark"] .ai-box { background: #3a3010; color: #f3e6bf; border-color: #8a6d1f; }
+[data-theme="dark"] .ai-box.ok { background: #1f3315; color: #cfe8b8; }

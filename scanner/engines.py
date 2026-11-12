@@ -142,8 +142,8 @@ def imread(path):
 class OllamaEngine:
     key, name = "ollama", "A · Local AI vision (Ollama)"
 
-    def __init__(self, model=None, url=OLLAMA_URL, timeout=1800):
-        self.url, self.timeout = url, timeout
+    def __init__(self, model=None, url=None, timeout=1800):
+        self.url, self.timeout = (url or OLLAMA_URL).rstrip("/"), timeout  # OLLAMA_URL can be moved to another port by the app
         self.model = model
 
     def _get(self, path, timeout=3):

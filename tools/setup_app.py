@@ -172,13 +172,13 @@ def install_ai(data_dir, log=print, progress=lambda f: None):
     if INST is None:
         return False
     here = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-    found = INST.scan(INST.search_dirs(here, data_dir, here), INST.PACKS["ai"])
+    found = INST.scan([here, os.path.dirname(data_dir), data_dir], INST.PACKS["ai"])  # next to Setup or in the app folder
     parts = found["parts"]
     if not parts:
         if found["problem"]:
             log("AI reader: " + found["problem"])
         else:
-            log("AI reader files (SeforimAI.tar.part1of3 …) not found next to Setup or in Downloads - you can add them later.")
+            log("AI reader files (SeforimAI.tar.part1of3 …) not next to Setup - you can put them in the app folder later and press 'Install AI pack' in the Scanner.")
         return False
     if INST.already_installed(data_dir, parts, "ai") and os.path.isdir(os.path.join(data_dir, "ai", "models")):
         log("AI handwriting reader is already installed")

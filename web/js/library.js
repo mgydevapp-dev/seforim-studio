@@ -509,6 +509,12 @@ const Library = {
           const h = gem.offsetHeight + 20, spans = [...side.querySelectorAll(".cm")];
           while (side.offsetHeight > h && spans.length) more.prepend(spans.pop());
         }
+        // one daf = one sheet of paper: shrink the whole page to fit A4 (about 718 x 1060 px inside the margins)
+        const body = d.body, w = body.scrollWidth, ht = body.scrollHeight;
+        const scale = Math.min(1, 718 / w, 1060 / ht);
+        body.style.zoom = scale.toFixed(3);
+        body.style.minWidth = "0"; body.style.padding = "0";
+        d.head.insertAdjacentHTML("beforeend", "<style>@page{size:A4;margin:8mm}html,body{height:auto;overflow:hidden}.vilna,.v-back,.v-trans{break-inside:avoid;page-break-inside:avoid}</style>");
       }
       f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000);
     }, 700);

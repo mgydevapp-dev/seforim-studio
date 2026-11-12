@@ -78,16 +78,26 @@ const Scanner = {
       ${e.key === "ollama" && e.models.length > 1 ? `<select id="scOm">${e.models.map(m => `<option ${m === App.state.settings.ollama_model ? "selected" : ""}>${esc(m)}</option>`).join("")}</select>` : ""}</div>`).join("") + `</div><a href="#" id="scRef" class="small">re-check</a>`;
     this.engs = es;
     const ai = await App.api("ai_status");
+    const aiOk = (es.find(e => e.key === "ollama") || {}).ok;
     if (ai.state === "running") {
-      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="card" style="background:var(--gold-soft)">⏳ ${esc(ai.message)} ${Math.round(ai.progress || 0)}%</div>`);
-      setTimeout(() => this.loadEngines(), 2000);
-    } else if (!es.find(e => e.key === "ollama").ok) {
-      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="card" style="background:var(--gold-soft);margin-bottom:6px">
-        <b>For handwriting, install the AI pack (one time):</b> download the <b>SeforimAI.tar.part…</b> files into your Downloads folder, then
-        <button class="btn small primary" id="scAiInst">Install AI pack</button> ${ai.message ? `<div class="small">${esc(ai.message)}</div>` : ""}
-        ${ai.bundled ? `<div class="small">The AI pack is installed but not running yet — <a href="#" id="scAiStart">start it</a>.</div>` : ""}</div>`);
-      $("#scAiInst").onclick = async () => { const r = await App.api("ai_check"); App.toast(r.message || (r.state === "idle" ? "No AI pack found in Downloads, Desktop or the app folder" : r.state)); this.loadEngines(); };
-      if ($("#scAiStart")) $("#scAiStart").onclick = async e => { e.preventDefault(); App.toast("Starting the AI reader…"); await App.api("ai_check"); this.loadEngines(); };
+      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="ai-box"><b>⏳ Installing the AI reader</b>
+        <div class="progress" style="height:12px;margin:6px 0"><div style="width:${ai.progress || 0}%"></div></div>
+        <div class="small">${esc(ai.message || "")} — ${Math.round(ai.progress || 0)}%. Keep the app open.</div></div>`);
+      clearTimeout(this._aiT); this._aiT = setTimeout(() => this.loadEngines(), 1000);
+    } else if (!aiOk) {
+      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="ai-box">
+        <b>🤖 AI handwriting reader</b>
+        <ol class="small" style="margin:6px 0 6px 18px;padding:0">
+          <li>Put the 3 files <code>SeforimAI.tar.part1of3</code>, <code>part2of3</code>, <code>part3of3</code> into the <b>app folder</b>:<br><code>${esc(ai.folder || "")}</code> <a href="#" id="scAiFolder">open it</a></li>
+          <li>Press <b>Install AI pack</b>. It checks the files, installs them and starts the AI (a few minutes).</li></ol>
+        <div class="row" style="gap:6px"><button class="btn small primary" id="scAiInst">Install AI pack</button>
+          ${ai.bundled ? `<button class="btn small" id="scAiStart">▶ Start the AI</button>` : ""}</div>
+        ${ai.message ? `<div class="small ${ai.state === "error" || ai.state === "incomplete" ? "lh-msg" : ""}" style="margin-top:6px">${esc(ai.message)}</div>` : ""}</div>`);
+      $("#scAiFolder").onclick = e => { e.preventDefault(); App.api("ai_open_folder"); };
+      $("#scAiInst").onclick = async () => { await App.api("ai_check", { force: true }); this.loadEngines(); };
+      if ($("#scAiStart")) $("#scAiStart").onclick = async () => { App.toast("Starting the AI reader… (up to a minute)"); await App.api("ai_check"); this.loadEngines(); };
+    } else if (ai.state === "done" && ai.message) {
+      $("#scEng").insertAdjacentHTML("afterbegin", `<div class="ai-box ok small">${esc(ai.message)}</div>`);
     }
     $("#scRef").onclick = e => { e.preventDefault(); this.loadEngines(); };
     if ($("#scOm")) $("#scOm").onchange = e => App.setSetting("ollama_model", e.target.value);

@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import secrets
+import sys
 import shutil
 import threading
 import time
@@ -105,7 +106,8 @@ class App:
         self.check_library_install()
         self.check_ai_install()
         self.check_more_install()
-        self.start_bundled_ollama()
+        if self.ai["state"] != "running" and self.bundled_ollama():
+            threading.Thread(target=self.start_bundled_ollama, daemon=True).start()  # the window opens without waiting for the AI
 
     # ------------------------------------------------------------------ bundled AI reader (Ollama + model)
     # ------------------------------------------------------------------ where the library and AI models live
@@ -242,80 +244,146 @@ class App:
                 return p
         return None
 
-    def start_bundled_ollama(self):
-        """Start the AI reader that ships with the app (only if no Ollama is already running)."""
+    def app_folder(self):
+        """The folder with SeforimStudio.exe - where the 3 AI files are put."""
+        exe = sys.executable if getattr(sys, "frozen", False) else os.path.join(self.base, "SeforimStudio.py")
+        return os.path.dirname(os.path.abspath(exe))
+
+    def start_bundled_ollama(self, wait=40):
+        """Start the AI reader that ships with the app. If another Ollama is already running on this computer without
+        our model, ours runs next to it on its own port. Returns True when the AI answers."""
+        from scanner import engines
         exe = self.bundled_ollama()
         if not exe:
+            self.ai.update(running=False)
             return False
-        from scanner.engines import OllamaEngine
-        if OllamaEngine().models() is not None:
-            return True  # an Ollama is already running (bundled or the user's own)
+        if self.ollama_proc and self.ollama_proc.poll() is None and engines.OllamaEngine().models():
+            return True
+        port = 11434
+        other = engines.OllamaEngine(url="http://127.0.0.1:11434").models()
+        if other is not None:
+            if other and any(m.startswith("qwen") for m in other):
+                engines.OLLAMA_URL = "http://127.0.0.1:11434"
+                return True                      # an Ollama with a reading model is already running - use it
+            port = 11435                         # someone else's Ollama is on 11434: run ours next to it
         env = dict(os.environ)
         env["OLLAMA_MODELS"] = os.path.join(self.ai_dir(), "models")
-        env["OLLAMA_HOST"] = "127.0.0.1:11434"
+        env["OLLAMA_HOST"] = f"127.0.0.1:{port}"
         env.setdefault("OLLAMA_KEEP_ALIVE", "60m")
-        env.setdefault("OLLAMA_FLASH_ATTENTION", "1")
+        env.pop("OLLAMA_ORIGINS", None)
+        for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+            env.pop(k, None)                     # local only - never through an internet filter / proxy
+        env["NO_PROXY"] = "127.0.0.1,localhost"
+        log_path = os.path.join(self.data, "ai_server_log.txt")
         try:
-            self.ollama_proc = winproc.popen([exe, "serve"], hidden=True, env=env, cwd=os.path.dirname(exe))
-            for _ in range(40):
+            if self.ollama_proc and self.ollama_proc.poll() is None:
+                self.ollama_proc.terminate()
+            log = open(log_path, "w", encoding="utf-8", errors="replace")
+            self.ollama_proc = winproc.popen([exe, "serve"], hidden=True, env=env, cwd=os.path.dirname(exe), stdout=log, stderr=log)
+            url = f"http://127.0.0.1:{port}"
+            for _ in range(wait * 2):
                 time.sleep(0.5)
-                if OllamaEngine().models() is not None:
-                    print("Bundled AI reader started")
-                    threading.Thread(target=OllamaEngine().warm_up, daemon=True).start()  # first page reads faster
+                if self.ollama_proc.poll() is not None:
+                    break
+                if engines.OllamaEngine(url=url).models() is not None:
+                    engines.OLLAMA_URL = url
+                    print("Bundled AI reader started on", url)
+                    threading.Thread(target=engines.OllamaEngine().warm_up, daemon=True).start()
                     return True
         except Exception as e:  # noqa
             print("Could not start the bundled AI reader:", e)
+        try:
+            tail = open(log_path, encoding="utf-8", errors="replace").read()[-600:]
+        except OSError:
+            tail = ""
+        self.ai.update(message="The AI reader did not start. " + (("Its log says: " + tail.strip().splitlines()[-1]) if tail.strip() else ""))
         return False
 
-    def check_ai_install(self, extra_dir=None):
+    def _ai_ready(self):
+        from scanner import engines
+        return bool(engines.OllamaEngine().models())
+
+    def check_ai_install(self, extra_dir=None, force=False):
+        """Install the AI pack from the 3 files SeforimAI.tar.part1of3 … in the app folder (where SeforimStudio.exe is)."""
         from . import installer
-        found = installer.scan(installer.search_dirs(os.path.dirname(self.shared), self.shared, extra_dir), installer.PACKS["ai"])
+        if self.ai["state"] == "running" and getattr(self, "_ai_thread", None) and self._ai_thread.is_alive():
+            return self.ai
+        dirs = [d for d in (extra_dir, self.app_folder(), self.shared, self.data) if d]
+        found = installer.scan(dirs, installer.PACKS["ai"])
         parts = found["parts"]
+        have = bool(self.bundled_ollama()) and os.path.isdir(os.path.join(self.ai_dir(), "models", "manifests"))
         if not parts:
-            if found["problem"]:
-                self.ai.update(state="incomplete", message=found["problem"])
+            if have:
+                return self.ai
+            self.ai.update(state="incomplete" if found["problem"] else "missing", progress=0,
+                           message=found["problem"] or f"Put the 3 files SeforimAI.tar.part1of3, part2of3 and part3of3 into the app folder "
+                                                       f"({self.app_folder()}) and press Install AI pack.")
+            return self.ai
+        if have and installer.already_installed(self.shared, parts, "ai") and not force:
             return self.ai
         need, free = installer.free_space(parts, self.shared, ratio=1.05)
-        if free < need and not installer.already_installed(self.shared, parts, "ai"):
-            self.ai.update(state="error", message=f"Not enough free disk space for the AI pack: needs about {need / 1e9:.0f} GB, "
+        if free < need:
+            self.ai.update(state="error", message=f"Not enough free disk space for the AI pack: it needs about {need / 1e9:.0f} GB, "
                            f"the drive has {free / 1e9:.1f} GB.")
             return self.ai
-        if installer.already_installed(self.shared, parts, "ai") or self.ai["state"] == "running":
-            return self.ai
-        self.ai.update(state="running", progress=0, message="Installing the AI handwriting reader (one time)…")
+        self.ai.update(state="running", progress=0, message="Checking the 3 AI files…")
 
         def run():
+            ai_dir = os.path.join(self.shared, "ai")
+            tmp = os.path.join(self.shared, "ai_installing")
             try:
-                tmp = self.ai_dir() + ".installing"
-                if os.path.isdir(tmp):
-                    shutil.rmtree(tmp, ignore_errors=True)
-                installer.extract_tar(parts, tmp, lambda x: self.ai.update(progress=round(x * 98, 1)))
-                src = os.path.join(tmp, "ai") if os.path.isdir(os.path.join(tmp, "ai")) else tmp
-                if self.ollama_proc:
+                # 1. the files are whole (a tar file can be checked as it is read; a bad part stops with a clear message)
+                if self.ollama_proc and self.ollama_proc.poll() is None:
                     self.ollama_proc.terminate()
-                if os.path.isdir(self.ai_dir()):
-                    shutil.rmtree(self.ai_dir(), ignore_errors=True)
-                shutil.move(src, self.ai_dir())
+                    time.sleep(2)
                 shutil.rmtree(tmp, ignore_errors=True)
+                self.ai.update(message="Unpacking the AI reader (5.6 GB, a few minutes)…")
+                installer.extract_tar(parts, tmp, lambda x: self.ai.update(progress=round(x * 90, 1)))
+                src = os.path.join(tmp, "ai") if os.path.isdir(os.path.join(tmp, "ai")) else tmp
+                if not any(os.path.exists(os.path.join(src, "ollama", n)) for n in ("ollama.exe", "ollama")):
+                    raise RuntimeError("the AI files are damaged or incomplete (the AI program is missing inside) - download them again")
+                if not os.path.isdir(os.path.join(src, "models", "manifests")):
+                    raise RuntimeError("the AI files are damaged or incomplete (the AI model is missing inside) - download them again")
+                # 2. put it in place (the old copy is moved aside first, so a half-copied folder never stays)
+                self.ai.update(progress=92, message="Putting the AI reader in place…")
+                if os.path.isdir(ai_dir):
+                    old = ai_dir + "_old"
+                    shutil.rmtree(old, ignore_errors=True)
+                    os.replace(ai_dir, old)
+                    shutil.rmtree(old, ignore_errors=True)
+                os.replace(src, ai_dir)
+                shutil.rmtree(tmp, ignore_errors=True)
+                self.set_location("ai", "")      # use this copy
+                self._usb_ai = None
+                # 3. start it and make sure it answers with the reading model
+                self.ai.update(progress=96, message="Starting the AI reader…")
+                if not self.start_bundled_ollama(wait=60):
+                    raise RuntimeError(self.ai.get("message") or "the AI reader did not start")
+                if not self._ai_ready():
+                    raise RuntimeError("the AI reader started but its reading model was not found - download the 3 files again")
                 installer.mark_installed(self.shared, parts, "ai")
-                self._cleanup_parts(parts)
-                started = self.start_bundled_ollama()
-                self.ai.update(state="done", progress=100,
-                               message="AI handwriting reader installed" + (" and running" if started else " (it starts with the app)"))
+                self.ai.update(state="done", progress=100, message="✅ AI handwriting reader installed and running. "
+                                                                   "You may delete the 3 SeforimAI files now.")
             except Exception as e:  # noqa
                 traceback.print_exc()
+                shutil.rmtree(tmp, ignore_errors=True)
                 self.ai.update(state="error", message=f"Could not install the AI reader: {e}")
-        threading.Thread(target=run, daemon=True).start()
+        self._ai_thread = threading.Thread(target=run, daemon=True)
+        self._ai_thread.start()
         return self.ai
 
     def api_ai_status(self, a):
-        return {**self.ai, "bundled": bool(self.bundled_ollama()), "running": self.ollama_proc is not None and self.ollama_proc.poll() is None}
+        return {**self.ai, "bundled": bool(self.bundled_ollama()), "folder": self.app_folder(),
+                "running": self._ai_ready() if self.ai.get("state") != "running" else False}
 
     def api_ai_check(self, a):
-        r = self.check_ai_install(a.get("folder"))
-        if r["state"] != "running" and self.bundled_ollama():
+        r = self.check_ai_install(a.get("folder"), force=bool(a.get("force")))
+        if r["state"] != "running" and self.bundled_ollama() and not self._ai_ready():
             self.start_bundled_ollama()
-        return r
+        return {**self.ai, "running": self._ai_ready() if self.ai.get("state") != "running" else False}
+
+    def api_ai_open_folder(self, a):
+        return self.api_open_folder({"path": self.app_folder()})
 
     # ------------------------------------------------------------------ pre-built library install
     def check_library_install(self, extra_dir=None):
