@@ -153,8 +153,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download latest --pattern 'SeforimLibrary.sqlite.xz.part*' -D engparts --repo ${{ github.repository }}
-          cat $(ls engparts/* | sort) | xz -d -T0 > eng.sqlite; rm -rf engparts; ls -la eng.sqlite
+          # all the English translations, fresh (texts only - no links needed)
+          python tools/prebuild_library.py --out eng.sqlite --workers 24 > eng.log 2>&1 || tail -20 eng.log
+          tail -3 eng.log; ls -la eng.sqlite
       - name: The Otzaria library (seforim + links)
         run: |
           git clone -q --depth 1 --filter=blob:none --sparse https://github.com/Sivan22/otzaria-library.git otz

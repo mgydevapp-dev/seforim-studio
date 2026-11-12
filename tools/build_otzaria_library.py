@@ -209,7 +209,7 @@ def main():
             except Exception:
                 continue
             for it in items if isinstance(items, list) else []:
-                stem2 = os.path.splitext(os.path.basename(str(it.get("path_2") or "")))[0]
+                stem2 = os.path.splitext(re.split(r"[\\/]", str(it.get("path_2") or ""))[-1])[0]  # Otzaria writes Windows paths
                 r1 = ref_at(stem1, int(float(it.get("line_index_1") or 0)))
                 r2 = ref_at(stem2, int(float(it.get("line_index_2") or 0)))
                 if not r1 or not r2:
