@@ -1436,6 +1436,7 @@ class App:
                                 fallback.append(i + 1)
                     except Exception:
                         traceback.print_exc()
+                out[-1] = engines.drop_repeats(out[-1])
             if progress:
                 progress(len(pages), len(pages), "done")
             if not engines.KNOWN_WORDS:

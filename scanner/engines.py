@@ -175,6 +175,10 @@ class OllamaEngine:
                         progress("".join(text)[-60:].replace("\n", " "), n)
                 if j.get("done"):
                     break
+                # stuck in a loop (the same line again and again)? stop now instead of writing it 100 times
+                lines = [x.strip() for x in "".join(text).split("\n") if x.strip()]
+                if len(lines) >= 6 and len(set(lines[-5:])) == 1:
+                    break
         c = "".join(text)
         if "</think>" in c:
             c = c.split("</think>", 1)[1]
@@ -479,11 +483,26 @@ _HEB = re.compile(r"[\u05d0-\u05ea]")
 KNOWN_WORDS = set()  # filled by the app from the library's word list (for a better check)
 
 
+def drop_repeats(text):
+    """A reader stuck in a loop writes the same line many times: keep it once."""
+    out, last, n = [], None, 0
+    for line in (text or "").split("\n"):
+        k = line.strip()
+        n = n + 1 if k and k == last else 0
+        last = k if k else last
+        if n < 1:
+            out.append(line)
+    return "\n".join(out)
+
+
 def text_quality(text):
-    """0..1 - how much of the output looks like real Hebrew words (not symbols / letter salad)."""
+    """0..1 - how much of the output looks like real Hebrew words (not symbols / letter salad / one line repeated)."""
     toks = [t for t in re.split(r"\s+", text or "") if t]
     if not toks:
         return 0.0
+    lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
+    if len(lines) >= 5 and len(set(lines)) <= len(lines) / 3:
+        return 0.05  # mostly the same line again and again
     good = 0
     for t in toks:
         letters = _HEB.findall(t)
