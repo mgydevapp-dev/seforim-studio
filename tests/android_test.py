@@ -40,36 +40,26 @@ for _ in range(60):
         break
     time.sleep(1)
 note(bool(pid), f"app process started (pid {pid})")
-sock = ""
-for _ in range(60):
-    socks = adb("shell", "cat", "/proc/net/unix")
-    m = re.search(r"@(webview_devtools_remote_\d+)", socks)
-    if m:
-        sock = m.group(1)
-        break
-    time.sleep(2)
-note(bool(sock), "WebView debugging socket found")
-adb("forward", "tcp:9222", f"localabstract:{sock}")
-
 with sync_playwright() as p:
-    b = p.chromium.connect_over_cdp("http://127.0.0.1:9222")
+    dev = p._android.devices()[0]
     page = None
     t0 = time.time()
-    while time.time() - t0 < 240:
-        for c in b.contexts:
-            for pg in c.pages:
-                if pg.url.startswith("http://127.0.0.1"):
-                    page = pg
-        if page:
-            break
-        time.sleep(3)
+    while time.time() - t0 < 240 and not page:
+        try:
+            wv = dev.web_view({"pkg": PKG}, timeout=20000)
+            pg = wv.page()
+            if pg.url.startswith("http://127.0.0.1"):
+                page = pg
+            else:
+                time.sleep(3)
+        except Exception as e:  # noqa
+            print("waiting for the WebView:", e)
+            time.sleep(3)
     if not page:
-        for c in b.contexts:
-            for pg in c.pages:
-                try:
-                    print("page:", pg.url, pg.inner_text("body")[:3000])
-                except Exception:
-                    pass
+        try:
+            print("page text:", pg.inner_text("body")[:3000])
+        except Exception:
+            pass
     note(page is not None, f"the app's pages loaded ({time.time() - t0:.0f} s after start)")
     errors = []
     if page:
@@ -101,7 +91,7 @@ with sync_playwright() as p:
         page.evaluate("App.show('home')")
         page.wait_for_timeout(1500)
         page.screenshot(path=os.path.join(OUT, "home.png"))
-    b.close()
+    dev.close()
 
 log = adb("logcat", "-d", "-s", "python.stdout:*", "python.stderr:*", "SeforimStudio:*", "AndroidRuntime:E")
 open(os.path.join(OUT, "logcat.txt"), "w").write(log)

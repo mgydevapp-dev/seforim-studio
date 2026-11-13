@@ -5,6 +5,7 @@ name: Build portable Windows exe
 on:
   push:
     branches: [main]
+    paths-ignore: ["android/**", "tests/android_test.py", "tools/make_android_ai.py", ".github/workflows/build-android.yml"]
   workflow_dispatch:
     inputs:
       build_library:
