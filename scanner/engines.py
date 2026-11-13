@@ -292,7 +292,7 @@ class OllamaEngine:
                                                                        f"AI is writing ({min(97, int(100 * n / expect))}%): …" + t)) if progress else None)
             if not getattr(self, "keep_nikud", False):
                 content = re.sub(r"[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]", "", content)  # handwriting has no nikud
-            texts.append(clean_transcription(content))
+            texts.append(fix_reversed(clean_transcription(content)))
         return merge_strips(texts)
 
 
@@ -481,6 +481,40 @@ def estimate_chars(img):
 # ====================================================================== is the text real Hebrew or random symbols?
 _HEB = re.compile(r"[\u05d0-\u05ea]")
 KNOWN_WORDS = set()  # filled by the app from the library's word list (for a better check)
+
+
+_FINAL, _NONFINAL_END = "ךםןףץ", "כמנפצ"
+
+
+def _backward_score(line):
+    """How 'backwards' a Hebrew line looks: words that start with a final letter (ם…) or end with a non-final
+    form (מ instead of ם) only happen when the letters were written in reverse order."""
+    n = 0
+    for w in re.findall(r"[\u05D0-\u05EA]+", line):
+        if len(w) < 2:
+            continue
+        n += w[0] in _FINAL
+        n -= w[-1] in _FINAL
+        n += w[-1] in _NONFINAL_END
+    return n
+
+
+def fix_reversed(text):
+    """Turn around lines the AI wrote back-to-front (it sometimes copies the letters in the order they appear left to right).
+    When most lines are clearly backwards, the whole text was written that way: every line is turned around."""
+    lines = (text or "").split("\n")
+    flip = str.maketrans("()[]{}<>", ")(][}{><")
+    heb = [l for l in lines if re.search(r"[\u05D0-\u05EA]{2}", l)]
+    backward = [l for l in heb if _backward_score(l) >= 1 and _backward_score(l[::-1]) < _backward_score(l)]
+    whole = len(heb) >= 2 and len(backward) * 2 >= len(heb)
+    out = []
+    for line in lines:
+        sc, rev = _backward_score(line), line[::-1].translate(flip)
+        if (whole and re.search(r"[\u05D0-\u05EA]{2}", line) and _backward_score(rev) <= sc) or (sc >= 2 and _backward_score(rev) < sc):
+            out.append(rev)
+        else:
+            out.append(line)
+    return "\n".join(out)
 
 
 def drop_repeats(text):
