@@ -304,8 +304,12 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}" models-cursive
 
   ai:
-    if: (github.event_name == 'workflow_dispatch' && inputs.build_ai) || contains(github.event.head_commit.message, '[ai]')
+    # "[ai]" = the standard AI pack (4B) on the main download page; "[ai8b]" = the bigger, more accurate 8B pack on its own page
+    if: (github.event_name == 'workflow_dispatch' && inputs.build_ai) || contains(github.event.head_commit.message, '[ai]') || contains(github.event.head_commit.message, '[ai8b]')
     runs-on: ubuntu-latest
+    env:
+      MODEL: ${{ contains(github.event.head_commit.message, '[ai8b]') && 'qwen3-vl:8b-instruct' || 'qwen3-vl:4b-instruct' }}
+      TAG: ${{ contains(github.event.head_commit.message, '[ai8b]') && 'ai-8b' || 'latest' }}
     timeout-minutes: 120
     steps:
       - name: Free disk space
@@ -326,7 +330,7 @@ jobs:
           export OLLAMA_MODELS=$PWD/pack/ai/models
           (ollama serve > serve.log 2>&1 &)
           sleep 5
-          ollama pull qwen3-vl:4b-instruct || ollama pull qwen3-vl:4b
+          ollama pull $MODEL || ollama pull qwen3-vl:4b
           ollama list
           du -sh pack/ai/models
           pkill ollama || true
@@ -359,18 +363,19 @@ jobs:
           cat $(ls SeforimAI.tar.part* | sort -V) | tar -tf - > /dev/null && echo "archive OK: $(cat $(ls SeforimAI.tar.part* | sort -V) | tar -tf - | wc -l) files"
           sha256sum SeforimAI.tar.part* > SeforimAI.sha256; cat SeforimAI.sha256
           ls -la
-      - name: Publish the AI pack (release "latest")
+      - name: Publish the AI pack
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           R="--repo ${{ github.repository }}"
-          gh release view latest $R > /dev/null 2>&1 || gh release create latest $R --title "Seforim Studio - portable Windows app" --notes "Building…"
-          for a in $(gh release view latest $R --json assets -q '.assets[].name' | grep '^SeforimAI' || true); do gh release delete-asset latest "$a" -y $R; done
-          gh release upload latest out/SeforimAI.tar.part* out/SeforimAI.sha256 --clobber $R
+          if [ "$TAG" = "latest" ]; then N="Seforim Studio - portable Windows app"; else N="AI handwriting reader - bigger, more accurate (8B)"; fi
+          gh release view $TAG $R > /dev/null 2>&1 || gh release create $TAG $R --title "$N" --notes "Put the SeforimAI.tar.part files into the Seforim Studio app folder (where SeforimStudio.exe is), then Scanner -> Install AI pack. Model: $MODEL"
+          for a in $(gh release view $TAG $R --json assets -q '.assets[].name' | grep '^SeforimAI' || true); do gh release delete-asset $TAG "$a" -y $R; done
+          gh release upload $TAG out/SeforimAI.tar.part* out/SeforimAI.sha256 --clobber $R
 
   ai-test:
     needs: [windows, ai]
-    if: always() && needs.windows.result == 'success' && (needs.ai.result == 'success' || contains(github.event.head_commit.message, '[ai-test]'))
+    if: always() && needs.windows.result == 'success' && !contains(github.event.head_commit.message, '[ai8b]') && (needs.ai.result == 'success' || contains(github.event.head_commit.message, '[ai-test]'))
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
