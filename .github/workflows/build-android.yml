@@ -1,0 +1,162 @@
+# Builds the Android app (APK), checks it on an Android emulator, and publishes it on the release "android".
+# Put "[aiandroid]" in a commit message (or run manually) to also build the AI pack for phones (Qwen3-VL 4B, GGUF).
+name: Build Android app
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", "core/**", "scanner/**", "web/**", "plugins/**", "tests/android_test.py", "tools/make_android_ai.py", ".github/workflows/build-android.yml"]
+  workflow_dispatch:
+    inputs:
+      build_ai:
+        description: "Also build the AI pack for phones"
+        type: boolean
+        default: false
+permissions:
+  contents: write
+
+jobs:
+  llama:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Build the AI program (llama.cpp server) for Android phones
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp
+          cd llama.cpp && git log -1 --format='llama.cpp %h %cd'
+          for ABI in arm64-v8a x86_64; do
+            EXTRA=""
+            if [ $ABI = arm64-v8a ]; then EXTRA="-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16"; fi
+            cmake -B b-$ABI -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_LATEST_HOME/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=$ABI -DANDROID_PLATFORM=android-26 -DANDROID_STL=c++_static -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_SHARED_LIBS=OFF -DGGML_OPENMP=OFF -DGGML_NATIVE=OFF -DGGML_LLAMAFILE=ON -DLLAMA_CURL=OFF \
+              -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=ON -DLLAMA_BUILD_TOOLS=ON $EXTRA
+            cmake --build b-$ABI --target llama-server -j 4
+            mkdir -p ../jniLibs/$ABI
+            $ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -o ../jniLibs/$ABI/libllama_server.so b-$ABI/bin/llama-server
+            ls -la ../jniLibs/$ABI
+          done
+      - uses: actions/upload-artifact@v4
+        with: { name: jniLibs, path: jniLibs }
+
+  apk:
+    needs: llama
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with: { name: jniLibs, path: android/app/src/main/jniLibs }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.9" }
+      - name: Build the offline dictionary (Translate page)
+        continue-on-error: true
+        run: python tools/build_langdata.py --out langdata/lang.sqlite --cache /tmp/langcache
+      - name: Build the APK
+        env:
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          cd android && gradle --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../SeforimStudio.apk
+          ls -la ../SeforimStudio.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: apk, path: SeforimStudio.apk }
+
+  emulator:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with: { name: apk }
+      - name: Allow the emulator to use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -q playwright
+      - name: Test the APK on an Android phone emulator
+        id: test
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          ram-size: 4096M
+          disk-size: 6000M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install -r SeforimStudio.apk
+            python tests/android_test.py android-results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: android-results, path: android-results }
+      - name: Publish the APK (release "android")
+        if: steps.test.outcome == 'success'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Seforim Studio for Android" --notes "Install SeforimStudio.apk on the phone. The AI reader for phones: SeforimAI-android.tar.part… files."
+          gh release upload android SeforimStudio.apk --clobber
+      - name: Stop if the test failed
+        if: steps.test.outcome != 'success'
+        run: exit 1
+
+  aipack:
+    if: contains(github.event.head_commit.message, '[aiandroid]') || inputs.build_ai
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Make room
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL; df -h .
+      - name: Download Qwen3-VL 4B (GGUF)
+        run: |
+          pip install -q huggingface_hub opencv-python-headless numpy
+          python tools/make_android_ai.py pack
+          ls -la pack/ai_android
+      - name: Check the AI really reads (llama.cpp + the app's own scanner code)
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp /tmp/llama
+          cmake -S /tmp/llama -B /tmp/lb -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DBUILD_SHARED_LIBS=OFF
+          cmake --build /tmp/lb --target llama-server -j 4
+          (/tmp/lb/bin/llama-server -m pack/ai_android/Qwen3-VL-4B-Instruct.gguf --mmproj pack/ai_android/mmproj-Qwen3-VL-4B-Instruct.gguf \
+            --host 127.0.0.1 --port 11436 -c 4096 -t 4 -ngl 0 --jinja -np 1 > serve.log 2>&1 &)
+          python - <<'P'
+          import os, sys, time; sys.path.insert(0, ".")
+          os.environ["SEFORIM_ANDROID"] = "1"
+          from scanner import engines
+          e = engines.LlamaCppEngine()
+          for _ in range(120):
+              if e.models(): break
+              time.sleep(2)
+          print("ready:", e.available(), flush=True)
+          t0 = time.time()
+          t = e.read_image(engines.imread("tests/data/handwriting_sample.jpg"))
+          print(f"read in {int(time.time()-t0)} s:\n{t}", flush=True)
+          print("expected:\n" + open("tests/data/handwriting_sample.txt", encoding="utf-8").read())
+          if len(t.strip()) < 20:
+              sys.exit("The AI gave no text - not publishing this pack")
+          P
+      - name: Show the AI log
+        if: always()
+        run: tail -40 serve.log || true
+      - name: Pack, split and publish (release "android")
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          mkdir -p out
+          cd pack && tar -cf - ai_android | split -b 1900M -d -a 1 - ../out/p_ && cd ..
+          cd out; n=$(ls p_* | wc -l); i=1
+          for f in $(ls p_* | sort); do mv "$f" "SeforimAI-android.tar.part${i}of${n}"; i=$((i+1)); done
+          cat SeforimAI-android.tar.part* | tar -t
+          sha256sum SeforimAI-android.tar.part* > SeforimAI-android.sha256; ls -la
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Seforim Studio for Android" --notes "Install SeforimStudio.apk on the phone."
+          for a in $(gh release view android --json assets -q '.assets[].name' | grep '^SeforimAI-android' || true); do gh release delete-asset android "$a" -y; done
+          gh release upload android SeforimAI-android.* --clobber

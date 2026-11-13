@@ -526,6 +526,7 @@ const Library = {
         body.style.minWidth = "0"; body.style.padding = "0";
         d.head.insertAdjacentHTML("beforeend", "<style>@page{size:A4;margin:8mm}html,body{height:auto;overflow:hidden}.vilna,.v-back,.v-trans{break-inside:avoid;page-break-inside:avoid}</style>");
       }
+      if (window.SeforimAndroid) { SeforimAndroid.printHtml("<!doctype html>" + f.contentDocument.documentElement.outerHTML, title || "Seforim Studio"); setTimeout(() => f.remove(), 2000); return; }
       f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 2000);
     }, 700);
   },

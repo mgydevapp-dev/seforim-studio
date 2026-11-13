@@ -28,6 +28,20 @@ from .library import Library
 from .share import ShareHub, local_ips, bluetooth_send, bluetooth_receive
 from .userdata import UserData
 
+ANDROID = bool(os.environ.get("SEFORIM_ANDROID"))  # running inside the Android app (android/ folder)
+
+
+def android_cfg():
+    try:
+        return json.loads(os.environ.get("SEFORIM_ANDROID_CFG") or "{}")
+    except ValueError:
+        return {}
+
+
+def android_java():
+    from java import jclass  # Chaquopy (only inside the Android app)
+    return jclass("org.seforimstudio.app.MainActivity")
+
 APP_VERSION = "1.0.0"
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("font/ttf", ".ttf")
@@ -237,7 +251,79 @@ class App:
             return {"folder": dest}
         return {"job": self.jobs.start(run)}
 
+    # ---- Android: the AI reader is llama.cpp (libllama_server.so inside the APK) + the Qwen3-VL 4B files (.gguf)
+    def android_ai_dir(self):
+        return os.path.join(self.shared, "ai_android")
+
+    def android_ai_files(self, d=None):
+        d = d or self.android_ai_dir()
+        try:
+            g = [os.path.join(d, n) for n in os.listdir(d) if n.lower().endswith(".gguf")]
+        except OSError:
+            return None, None
+        mm = next((x for x in g if "mmproj" in os.path.basename(x).lower()), None)
+        model = next((x for x in g if x != mm), None)
+        return model, mm
+
+    def android_llama_exe(self):
+        p = os.path.join(android_cfg().get("native") or "", "libllama_server.so")
+        return p if os.path.exists(p) else None
+
+    def start_llama(self, wait=180):
+        from scanner import engines
+        exe = self.android_llama_exe()
+        model, mm = self.android_ai_files()
+        if not (exe and model and mm):
+            return False
+        e = engines.LlamaCppEngine()
+        if self.ollama_proc and self.ollama_proc.poll() is None:
+            if e.models() is not None:
+                return True
+        n = os.cpu_count() or 4
+        threads = 4 if n >= 8 else max(2, n - 1)  # the fast cores of a phone
+        log_path = os.path.join(self.data, "ai_server_log.txt")
+        cmd = [exe, "-m", model, "--mmproj", mm, "--host", "127.0.0.1", "--port", engines.LLAMA_URL.rsplit(":", 1)[1],
+               "-c", "4096", "-t", str(threads), "-ngl", "0", "--jinja", "--no-webui", "-np", "1"]
+        try:
+            log = open(log_path, "w", encoding="utf-8", errors="replace")
+            env = dict(os.environ, LD_LIBRARY_PATH=os.path.dirname(exe))
+            self.ollama_proc = winproc.popen(cmd, env=env, cwd=os.path.dirname(model), stdout=log, stderr=log)
+            for _ in range(wait * 2):
+                time.sleep(0.5)
+                if self.ollama_proc.poll() is not None:
+                    break
+                if e.models():
+                    print("AI reader (llama.cpp) is ready", flush=True)
+                    return True
+        except Exception as ex:  # noqa
+            print("Could not start the AI reader:", ex)
+        try:
+            tail = open(log_path, encoding="utf-8", errors="replace").read().strip().splitlines()[-1:]
+        except (OSError, IndexError):
+            tail = []
+        if self.ollama_proc and self.ollama_proc.poll() is None:
+            return False  # still loading - it keeps going in the background
+        self.ai.update(message="The AI reader did not start. " + (("Its log says: " + tail[0]) if tail else ""))
+        return False
+
+    def android_dirs(self):
+        """Folders on the phone where downloaded library / AI files are looked for."""
+        cfg = android_cfg()
+        dl = cfg.get("download") or "/storage/emulated/0/Download"
+        dirs = [os.path.join(self.shared, "incoming"), self.shared, dl, os.path.join(dl, "Seforim Studio"), os.path.dirname(dl)]
+        for st in cfg.get("storages") or []:
+            dirs += [os.path.join(st["path"], "incoming"), st["path"]]
+            if st.get("removable") and st.get("root"):
+                dirs += [st["root"], os.path.join(st["root"], "Download"), os.path.join(st["root"], "SeforimStudio")]
+        out = []
+        for d in dirs:
+            if d and d not in out and os.path.isdir(d):
+                out.append(d)
+        return out
+
     def bundled_ollama(self):
+        if ANDROID:
+            return self.android_llama_exe() if all(self.android_ai_files()) else None
         for name in ("ollama.exe", "ollama"):
             p = os.path.join(self.ai_dir(), "ollama", name)
             if os.path.exists(p):
@@ -246,6 +332,8 @@ class App:
 
     def app_folder(self):
         """The folder with SeforimStudio.exe - where the 3 AI files are put."""
+        if ANDROID:
+            return android_cfg().get("download") or self.shared
         exe = sys.executable if getattr(sys, "frozen", False) else os.path.join(self.base, "SeforimStudio.py")
         return os.path.dirname(os.path.abspath(exe))
 
@@ -253,6 +341,8 @@ class App:
         """Start the AI reader that ships with the app. If another Ollama is already running on this computer without
         our model, ours runs next to it on its own port. Returns True when the AI answers."""
         from scanner import engines
+        if ANDROID:
+            return self.start_llama()
         exe = self.bundled_ollama()
         if not exe:
             self.ai.update(running=False)
@@ -306,6 +396,8 @@ class App:
     def check_ai_install(self, extra_dir=None, force=False):
         """Install the AI pack from the 3 files SeforimAI.tar.part1of3 … in the app folder (where SeforimStudio.exe is)."""
         from . import installer
+        if ANDROID:
+            return self.check_ai_install_android(extra_dir, force)
         if self.ai["state"] == "running" and getattr(self, "_ai_thread", None) and self._ai_thread.is_alive():
             return self.ai
         dirs = [d for d in (extra_dir, self.app_folder(), self.shared, self.data) if d]
@@ -372,6 +464,67 @@ class App:
         self._ai_thread.start()
         return self.ai
 
+    def check_ai_install_android(self, extra_dir=None, force=False):
+        from . import installer
+        if self.ai["state"] == "running" and getattr(self, "_ai_thread", None) and self._ai_thread.is_alive():
+            return self.ai
+        base = installer.PACKS["ai_android"]
+        found = installer.scan([d for d in [extra_dir] + self.android_dirs() if d], base)
+        parts = found["parts"]
+        have = all(self.android_ai_files())
+        if not parts:
+            if have:
+                return self.ai
+            self.ai.update(state="incomplete" if found["problem"] else "missing", progress=0,
+                           message=found["problem"] or f"Download the {base}.part… files onto this phone (they go into Download), "
+                                                       f"or copy them to the SD card, then press Install AI pack.")
+            return self.ai
+        if have and installer.already_installed(self.shared, parts, "ai_android") and not force:
+            return self.ai
+        need, free = installer.free_space(parts, self.shared, ratio=1.05)
+        if free < need:
+            self.ai.update(state="error", message=f"Not enough free space for the AI pack: it needs about {need / 1e9:.1f} GB, "
+                           f"there is {free / 1e9:.1f} GB. Choose the SD card in Settings → Library → Phone storage, or free up space.")
+            return self.ai
+        self.ai.update(state="running", progress=0, message="Checking the AI files…")
+
+        def run():
+            dest, tmp = self.android_ai_dir(), os.path.join(self.shared, "ai_android_installing")
+            try:
+                if self.ollama_proc and self.ollama_proc.poll() is None:
+                    self.ollama_proc.terminate()
+                    time.sleep(1)
+                shutil.rmtree(tmp, ignore_errors=True)
+                self.ai.update(message="Unpacking the AI reader (about 3.5 GB, a few minutes)…")
+                installer.extract_tar(parts, tmp, lambda x: self.ai.update(progress=round(x * 90, 1)))
+                src = os.path.join(tmp, "ai_android") if os.path.isdir(os.path.join(tmp, "ai_android")) else tmp
+                if not all(self.android_ai_files(src)):
+                    raise RuntimeError("the AI files are damaged or incomplete (a .gguf file is missing inside) - download them again")
+                self.ai.update(progress=92, message="Putting the AI reader in place…")
+                if os.path.isdir(dest):
+                    shutil.rmtree(dest, ignore_errors=True)
+                os.replace(src, dest)
+                shutil.rmtree(tmp, ignore_errors=True)
+                self.ai.update(progress=95, message="Starting the AI reader (loading 3 GB into memory, up to 2 minutes)…")
+                if not self.start_llama(wait=240):
+                    raise RuntimeError(self.ai.get("message") or "the AI reader did not start (the phone may not have enough memory - it needs 6 GB RAM)")
+                installer.mark_installed(self.shared, parts, "ai_android")
+                for p in parts:  # copies made by "Pick files…" are not needed any more
+                    if os.path.basename(os.path.dirname(p)) == "incoming":
+                        try:
+                            os.remove(p)
+                        except OSError:
+                            pass
+                self.ai.update(state="done", progress=100, message="✅ AI handwriting reader installed and running on this phone. "
+                                                                   "You may delete the downloaded SeforimAI-android files now.")
+            except Exception as e:  # noqa
+                traceback.print_exc()
+                shutil.rmtree(tmp, ignore_errors=True)
+                self.ai.update(state="error", message=f"Could not install the AI reader: {e}")
+        self._ai_thread = threading.Thread(target=run, daemon=True)
+        self._ai_thread.start()
+        return self.ai
+
     def api_ai_status(self, a):
         return {**self.ai, "bundled": bool(self.bundled_ollama()), "folder": self.app_folder(),
                 "running": self._ai_ready() if self.ai.get("state") != "running" else False}
@@ -394,6 +547,8 @@ class App:
         if extra_dir:
             self._extra_dir = extra_dir  # remember the folder the user typed
         dirs = installer.search_dirs(app_dir, self.shared, extra_dir or getattr(self, "_extra_dir", None))
+        if ANDROID:
+            dirs = [d for d in [extra_dir or getattr(self, "_extra_dir", None)] if d] + self.android_dirs()
         if self.shared != self.data:
             dirs.insert(1, self.data)
         found = installer.scan(dirs)
@@ -487,7 +642,8 @@ class App:
         """Remove part files that Setup copied INTO the app folder (never touches the user's Downloads)."""
         app_dir = os.path.abspath(os.path.dirname(self.data))
         for p in parts:
-            if os.path.dirname(os.path.abspath(p)) in (app_dir, os.path.abspath(self.data), os.path.abspath(self.shared)):
+            if os.path.dirname(os.path.abspath(p)) in (app_dir, os.path.abspath(self.data), os.path.abspath(self.shared),
+                                                      os.path.abspath(os.path.join(self.shared, "incoming"))):
                 try:
                     os.remove(p)
                 except OSError:
@@ -827,8 +983,73 @@ class App:
         return {"categories": self.lib.category_histogram(a["q"], a.get("lang", "auto"), a.get("opts")),
                 "eras": self.lib.era_histogram(a["q"], a.get("lang", "auto"), a.get("opts"))}
     # ------------------------------------------------------------------ native dialogs: choose folder / file, save as
+    def api_android_storage(self, a):
+        """Android: where the big files (library, AI) are kept - phone storage or the SD card - and moving them."""
+        if not ANDROID:
+            raise ValueError("Only in the Android app")
+        J = android_java()
+        sts = json.loads(str(J.storagesJson()))
+        files = android_cfg().get("files") or self.data
+        if a.get("set"):
+            new = a["set"]
+            if not any(os.path.abspath(new) == os.path.abspath(x["path"]) for x in sts):
+                raise ValueError("Unknown storage place")
+            os.makedirs(new, exist_ok=True)
+            old = self.shared
+            json.dump({"path": new}, open(os.path.join(files, "storage.json"), "w", encoding="utf-8"))
+            if not a.get("move") or os.path.abspath(old) == os.path.abspath(new):
+                return {"ok": True, "restart": True}
+
+            def run(progress=None, cancel=None):
+                names = ["library.sqlite", "ai_android", "seforim_catalog.db", "locations.json", "installed.json"]
+                items = [(os.path.join(old, n), os.path.join(new, n)) for n in names if os.path.exists(os.path.join(old, n))]
+                files_ = []
+                for src, _ in items:
+                    if os.path.isdir(src):
+                        files_ += [os.path.join(r, f) for r, _, fs in os.walk(src) for f in fs]
+                    else:
+                        files_.append(src)
+                total, done = sum(os.path.getsize(f) for f in files_) or 1, 0
+                need = total - sum(os.path.getsize(f) for f in files_ if os.path.exists(os.path.join(new, os.path.relpath(f, old))))
+                if shutil.disk_usage(new).free < need + (200 << 20):
+                    raise ValueError(f"Not enough free space there: {need / 1e9:.1f} GB needed")
+                with self.lib.lock:
+                    self.lib.close()
+                    if self.ollama_proc:
+                        self.ollama_proc.terminate()
+                    for f in files_:
+                        t = os.path.join(new, os.path.relpath(f, old))
+                        os.makedirs(os.path.dirname(t), exist_ok=True)
+                        with open(f, "rb") as i, open(t + ".moving", "wb") as o:
+                            while True:
+                                b = i.read(8 << 20)
+                                if not b:
+                                    break
+                                o.write(b)
+                                done += len(b)
+                                if progress:
+                                    progress(done, total, f"Moving… {done / 1e9:.1f} of {total / 1e9:.1f} GB")
+                        os.replace(t + ".moving", t)
+                    for src, _ in items:
+                        shutil.rmtree(src, ignore_errors=True) if os.path.isdir(src) else os.remove(src)
+                return {"ok": True, "restart": True}
+            return {"job": self.jobs.start(run)}
+        out = []
+        for x in sts:
+            p = x["path"]
+            lib = os.path.join(p, "library.sqlite")
+            m, mm = self.android_ai_files(os.path.join(p, "ai_android"))
+            out.append(dict(x, current=os.path.abspath(p) == os.path.abspath(self.shared),
+                            library_gb=round(os.path.getsize(lib) / 1e9, 1) if os.path.exists(lib) else 0, ai=bool(m and mm)))
+        cfg = android_cfg()
+        return {"storages": out, "shared": self.shared, "all_files": bool(J.allFilesAccess()), "download": cfg.get("download"),
+                "incoming": os.path.join(self.shared, "incoming"), "ram_gb": round((cfg.get("ram") or 0) / 1e9, 1),
+                "model": cfg.get("model"), "search": self.android_dirs()}
+
     def api_pick(self, a):
         from . import dialogs
+        if ANDROID:
+            raise ValueError("Type the folder (on a phone the app chooses the place for you)")
         kind = a.get("kind", "folder")
         if kind == "folder":
             return {"path": dialogs.pick_folder(a.get("title") or "Choose a folder", a.get("start") or "")}
@@ -846,6 +1067,9 @@ class App:
         src = os.path.abspath(os.path.join(self.data, *rel.split("/")))
         if not src.startswith(os.path.abspath(self.data)) or not os.path.exists(src):
             raise ValueError("File not found")
+        if ANDROID:
+            return {"saved": True, "path": android_java().saveToDownloads(src, a.get("name") or os.path.basename(src),
+                                                                         mimetypes.guess_type(a.get("name") or src)[0] or "")}
         last = self.user.get_setting("last_save_dir") or os.path.join(os.path.expanduser("~"), "Documents")
         dest = dialogs.save_as("Save as", a.get("name") or os.path.basename(src), last)
         if not dest:
@@ -858,6 +1082,12 @@ class App:
         """Save data made in the window (a picture, a CSV…) where the user chooses."""
         import base64
         from . import dialogs
+        if ANDROID:
+            name = re.sub(r'[\\/:*?"<>|]', "_", a.get("name") or "file")
+            tmp = os.path.join(self.data, "exports", name)
+            data = a["data"]
+            open(tmp, "wb").write(base64.b64decode(data.split(",", 1)[1]) if data.startswith("data:") else data.encode("utf-8"))
+            return {"saved": True, "path": android_java().saveToDownloads(tmp, name, mimetypes.guess_type(name)[0] or "")}
         last = self.user.get_setting("last_save_dir") or os.path.join(os.path.expanduser("~"), "Documents")
         dest = dialogs.save_as("Save as", a.get("name") or "file", last)
         if not dest:
@@ -1583,6 +1813,8 @@ class App:
             os.makedirs(p, exist_ok=True)
         if not os.path.exists(p):
             return {"ok": False}
+        if ANDROID:
+            return {"ok": False, "path": p}
         if os.name == "nt":
             os.startfile(p if os.path.isdir(p) else os.path.dirname(p))  # noqa
         elif shutil.which("open"):
@@ -1679,7 +1911,7 @@ def make_handler(app):
                 fn = f"{uuid.uuid4().hex[:6]}-{safe}"
                 with open(os.path.join(app.data, "uploads", fn), "wb") as f:
                     f.write(body)
-                return self._send(200, {"upload": fn, "name": name, "size": len(body)})
+                return self._send(200, {"upload": fn, "name": name, "size": len(body), "path": os.path.join(app.data, "uploads", fn)})
             if u.path.startswith("/api/"):
                 name = u.path[5:]
                 fn = getattr(app, "api_" + name, None)

@@ -11,7 +11,8 @@ import os
 import re
 import sqlite3
 
-PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar", "more": "SeforimMore.sqlite.xz"}
+PACKS = {"library": "SeforimLibrary.sqlite.xz", "ai": "SeforimAI.tar", "more": "SeforimMore.sqlite.xz",
+         "ai_android": "SeforimAI-android.tar"}
 
 
 PART_SIZE = 1900 * 1024 * 1024  # every part except the last one is exactly this big (split -b 1900M)

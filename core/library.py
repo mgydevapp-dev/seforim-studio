@@ -43,7 +43,10 @@ class Library:
         self._readers = []
         self.db = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self.db.row_factory = sqlite3.Row
-        self.db.execute("PRAGMA journal_mode=WAL")
+        try:
+            self.db.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:  # some SD cards / phone folders cannot hold the WAL side files
+            self.db.execute("PRAGMA journal_mode=DELETE")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.create_function("regexp", 2, lambda p, s: 1 if s and re.search(p, s) else 0, deterministic=True)
         self._init()

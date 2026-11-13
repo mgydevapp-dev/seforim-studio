@@ -121,7 +121,8 @@ def _similar(a, b):
     return difflib.SequenceMatcher(None, a, b).ratio() > 0.8
 
 
-def _to_png_b64(img, max_side=1100):
+def _to_png_b64(img, max_side=None):
+    max_side = max_side or (960 if os.environ.get("SEFORIM_ANDROID") else 1100)  # a phone reads a smaller picture faster
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
     h, w = img.shape[:2]
@@ -294,6 +295,108 @@ class OllamaEngine:
                 content = re.sub(r"[\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]", "", content)  # handwriting has no nikud
             texts.append(fix_reversed(clean_transcription(content)))
         return merge_strips(texts)
+
+
+# ====================================================================== A2) the same AI on Android phones (llama.cpp)
+ANDROID = bool(os.environ.get("SEFORIM_ANDROID"))
+LLAMA_URL = os.environ.get("SEFORIM_LLAMA_URL") or "http://127.0.0.1:11436"
+
+
+class LlamaCppEngine(OllamaEngine):
+    """Qwen3-VL run by llama.cpp's llama-server (the AI reader inside the Android app).
+    Talks the OpenAI-style /v1/chat/completions; takes the same requests as the Ollama engine."""
+    key, name = "ollama", "A · AI reader (on this phone)"
+    MODEL = "qwen3-vl-4b (phone)"
+
+    def __init__(self, model=None, url=None, timeout=3600):
+        self.url, self.timeout, self.model = (url or LLAMA_URL).rstrip("/"), timeout, model
+
+    def models(self):
+        try:
+            with _LOCAL.open(self.url + "/health", timeout=3) as r:
+                ok = r.status == 200
+        except urllib.error.HTTPError as e:
+            return [] if e.code == 503 else None  # 503 = still loading the model
+        except Exception:
+            return None
+        return [self.MODEL] if ok else []
+
+    def pick_model(self):
+        return self.MODEL if self.models() else None
+
+    def available(self):
+        m = self.models()
+        if m is None:
+            return False, "AI pack not installed - put the SeforimAI-android files on the phone and press 'Install AI pack'"
+        if not m:
+            return False, "The AI reader is still starting (loading the model into memory)…"
+        return True, "model Qwen3-VL 4B on this phone"
+
+    @staticmethod
+    def _openai(body):
+        m = body["messages"][0]
+        content = [{"type": "text", "text": m["content"]}] + [
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," + im}} for im in m.get("images") or []]
+        o = body.get("options") or {}
+        return {"messages": [{"role": "user", "content": content}], "temperature": o.get("temperature", 0),
+                "top_p": o.get("top_p", 0.9), "max_tokens": o.get("num_predict", 1200),
+                "repeat_penalty": o.get("repeat_penalty", 1.05), "cache_prompt": False}
+
+    def _stream(self, body, progress=None):
+        b = dict(self._openai(body), stream=True)
+        req = urllib.request.Request(self.url + "/v1/chat/completions", data=json.dumps(b).encode(),
+                                     headers={"Content-Type": "application/json"})
+        text, last = [], 0
+        with _LOCAL.open(req, timeout=self.timeout) as r:
+            for line in r:
+                line = line.strip()
+                if not line.startswith(b"data:"):
+                    continue
+                line = line[5:].strip()
+                if line == b"[DONE]":
+                    break
+                j = json.loads(line)
+                ch = (j.get("choices") or [{}])[0]
+                piece = (ch.get("delta") or {}).get("content") or ""
+                if piece:
+                    text.append(piece)
+                    n = sum(len(x) for x in text)
+                    if progress and n - last > 15:
+                        last = n
+                        progress("".join(text)[-60:].replace("\n", " "), n)
+                if ch.get("finish_reason"):
+                    break
+                lines = [x.strip() for x in "".join(text).split("\n") if x.strip()]
+                if len(lines) >= 6 and len(set(lines[-5:])) == 1:
+                    break
+        c = "".join(text)
+        if "</think>" in c:
+            c = c.split("</think>", 1)[1]
+        return c.strip()
+
+    def _ask(self, body, progress=None):
+        try:
+            c = self._stream(body, progress)
+            if c:
+                return c
+        except Exception as e:  # noqa
+            if AI_DEBUG:
+                open(AI_DEBUG, "a", encoding="utf-8").write(f"--- llama stream failed: {e}\n")
+        out = self._post("/v1/chat/completions", self._openai(body))
+        c = (((out.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not c:
+            raise RuntimeError("The AI gave no text for this page. Try 'Unclear / messy'.")
+        return c
+
+    def warm_up(self):
+        try:
+            self._post("/v1/chat/completions", {"messages": [{"role": "user", "content": "שלום"}], "max_tokens": 1})
+        except Exception:
+            pass
+
+
+if ANDROID:
+    OllamaEngine = LlamaCppEngine  # noqa: F811  the app's code asks for "the AI reader"; on a phone it is llama.cpp
 
 
 # ====================================================================== B) Kraken
@@ -563,6 +666,8 @@ def strip_noise(text):
 
 # ====================================================================== registry
 def engines(models_dir=None, ollama_model=None, kraken_model=None):
+    if ANDROID:
+        return [LlamaCppEngine(), TesseractEngine()]
     return [OllamaEngine(ollama_model), KrakenEngine(kraken_model, models_dir), TesseractEngine()]
 
 
