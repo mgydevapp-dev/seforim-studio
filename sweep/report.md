@@ -1,0 +1,48 @@
+# Error sweep
+
+**0 problems**
+
+
+## Slowest calls
+```
+   0.37s  catalog_tree  {}
+   0.35s  roshei  {"letters": "אבג"}
+   0.32s  gematria_phrases  {"value": 376}
+   0.06s  he_coverage  {}
+   0.05s  search  {"q": "שלום", "lang": "he"}
+   0.05s  search  {"q": "light AND darkness", "lang": "en"}
+   0.04s  plugin_call  {"id": "chazara", "fn": "add", "args": {"ref": "Genesis 1:1", "whole_chapter": true}}
+   0.03s  translate  {"q": "בראשית ברא אלהים"}
+   0.03s  roshei  {"letters": "שמע", "mode": "sofei"}
+   0.03s  reading_log  {}
+   0.03s  plugin_call  {"id": "chazara", "fn": "add", "args": {"question": "Q?", "answer": "A"}}
+   0.03s  library_health  {}
+   0.03s  lib_chapter  {"work_id": 487, "node": "", "chapter": "2a"}
+   0.03s  lib_chapter  {"work_id": 1355, "node": "", "chapter": "1"}
+   0.03s  els  {"work_id": 1355, "word": "תורה", "id": 4, "min": 2, "max": 60}
+   0.02s  search_compare  {"q": "שבת"}
+   0.02s  search  {"q": "אור", "lang": "he", "sort": "book"}
+   0.02s  search  {"q": "אהב*", "lang": "he"}
+   0.02s  search  {"q": "peace", "lang": "en"}
+   0.02s  search  {"q": "\"קריאת שמע\"", "lang": "he"}
+   0.02s  lib_works  {}
+   0.02s  find_ref  {"ref": "בראשית א:א"}
+   0.02s  find_ref  {"ref": "Genesis 1:1"}
+   0.02s  find_ref  {"ref": "Berakhot 2a"}
+   0.02s  dashboard  {}
+   0.02s  cross_lingual  {"q": "שלום"}
+   0.02s  cross_lingual  {"q": "peace"}
+   0.01s  word_cloud  {"q": "שבת"}
+   0.01s  translate  {"q": "שלום"}
+   0.01s  status  {}
+   0.01s  plugin_call  {"id": "daily_learning", "fn": "today"}
+   0.01s  plugin_call  {"id": "chazara", "fn": "due"}
+   0.01s  cooccurrence  {"q": "שבת", "a": "שבת", "b": "שמירה"}
+   0.00s  work_stats  {"work_id": 1355, "q": "אור", "a": "אור", "b": "חשך"}
+   0.00s  translate  {"q": "peace"}
+   0.00s  tools  {}
+   0.00s  timeline  {}
+   0.00s  search_history  {}
+   0.00s  plugins  {}
+   0.00s  plugin_call  {"id": "word_study", "fn": "study", "args": {"word": "אור"}}
+```

@@ -1,0 +1,1 @@
+all users: OK {"library":"C:\\ProgramData\\SeforimStudio\\library.sqlite","ai":"C:\\ProgramData\\SeforimStudio\\ai","ai_found":false,"data":"C:\\Users\\runneradmin\\AppData\\Local\\SeforimStudio","shared":"C:\\ProgramData\\SeforimStudio","all_users":true,"custom":{}}
