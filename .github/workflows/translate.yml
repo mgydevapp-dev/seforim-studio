@@ -1,0 +1,23 @@
+# Offline English translation of the library (no Sefaria): JPS 1917 for Tanach + OPUS-MT machine translation.
+name: Translate library
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/translate.yml", "tools/mt_speed.py"]
+permissions:
+  contents: write
+jobs:
+  speed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: |
+          pip install -q ctranslate2 transformers sentencepiece sacremoses torch --extra-index-url https://download.pytorch.org/whl/cpu
+          for m in Helsinki-NLP/opus-mt-he-en Helsinki-NLP/opus-mt-tc-big-he-en; do
+            ct2-transformers-converter --model $m --output_dir ct2_${m##*/} --quantization int8 || echo "no $m"
+          done
+          du -sh ct2_* || true
+          python tools/mt_speed.py Helsinki-NLP/opus-mt-he-en Helsinki-NLP/opus-mt-tc-big-he-en
