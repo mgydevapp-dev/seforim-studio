@@ -187,12 +187,12 @@ const Library = {
     App.show("library");
     const r = await App.api("lib_toc", { work_id });
     let idx = this.tabs.findIndex(t => t.work_id === work_id);
-    const t = { work_id, title: r.work.title, he_title: r.work.he_title, toc: r.toc, node: node ?? r.toc[0]?.node ?? "", chapter: chapter ?? r.toc[0]?.chapter ?? "", focus: passageId, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx };
+    const t = { work_id, title: r.work.title, he_title: r.work.he_title, toc: r.toc, node: node ?? r.toc[0]?.node ?? "", chapter: chapter ?? r.toc[0]?.chapter ?? "", focus: passageId, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx, jps: r.work.jps };
     if (idx >= 0 && !newTab) this.tabs[idx] = t; else if (this.tabs.length && !newTab && this.activeIdx >= 0) { idx = this.activeIdx; this.tabs[idx] = t; } else { this.tabs.push(t); idx = this.tabs.length - 1; }
     this.activeIdx = idx; this.drawTabs(); await this.loadChapter(); App.saveSession();
   },
   async restore(sess) {
-    for (const s of sess.tabs) { try { const r = await App.api("lib_toc", { work_id: s.work_id }); if (r.work) this.tabs.push({ ...s, he_title: r.work.he_title, toc: r.toc, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx }); } catch (e) { } }
+    for (const s of sess.tabs) { try { const r = await App.api("lib_toc", { work_id: s.work_id }); if (r.work) this.tabs.push({ ...s, he_title: r.work.he_title, toc: r.toc, sections: JSON.parse(r.work.section_names || "[]"), has_en: r.work.has_en, has_basic: r.work.has_basic, en_approx: r.work.en_approx, jps: r.work.jps }); } catch (e) { } }
     this.activeIdx = Math.min(sess.active || 0, this.tabs.length - 1);
     if (this.tabs.length && $("#bookTabs")) { this.drawTabs(); this.loadChapter(); }
   },
@@ -256,7 +256,9 @@ const Library = {
     const m = this.view.mode; const cls = m === "he" ? "he-only" : m === "en" ? "en-only" : m === "stacked" ? "stacked" : "";
     const he = (m !== "en" && p.he) ? `<div class="he">${esc(this.nk(p.he))}</div>` : (m === "side" ? "<div></div>" : "");
     const enText = this.view.tr === "basic" && p.en_basic ? p.en_basic : p.en;
-    const en = (m !== "he" && enText) ? `<div class="en">${esc(enText)}</div>` : "";
+    const en = (m !== "he" && enText) ? `<div class="en">${esc(enText)}</div>`
+      : (m !== "he" && p.ai_en) ? `<div class="en ai-en">${esc(p.ai_en)}<div class="small muted">🤖 AI translation — may have mistakes</div></div>`
+      : (m !== "he" && p.he && this.view.tr !== "inter") ? `<div class="en ai-en"><button class="btn small" data-act="aitr" title="Translate this passage with the AI (machine translation)">🤖 Translate with AI</button></div>` : "";
     if (this.view.tr === "inter" && p.he) return `<div class="psg inter ${hl}" data-id="${p.id}" data-ref="${esc(p.ref)}"><div class="vnum">${esc(p.verse || "")}</div><div class="inter-words" data-inter="${esc(p.ref)}">${esc(this.nk(p.he))}</div>${en}</div>`;
     const nl = (t.links || {})[p.id];
     return `<div class="psg ${cls} ${hl}" data-id="${p.id}" data-ref="${esc(p.ref)}">
@@ -284,6 +286,7 @@ const Library = {
     }
     el.innerHTML = this.translationNote(t) + `<div class="comm-bar" id="rChips"></div>` + html + `<div class="row" style="justify-content:center;margin-top:30px"><button class="btn" id="rNext2">Next ›</button></div>`;
     $("#rNext2").onclick = () => this.step(1);
+    const ap = $("[data-aipage]", el); if (ap) ap.onclick = e => { e.preventDefault(); this.aiTranslatePage(); };
     this.drawCommChips(t, cur);
     if (this.view.tr === "inter") this.fillInter(el);
     this.bindPassages(el, t);
@@ -294,7 +297,8 @@ const Library = {
     const tr = this.view.tr || "full", m = this.view.mode;
     if (m === "he") return "";
     let msg = "";
-    if (t.has_en === false && tr !== "inter") msg = "ⓘ This sefer has no English translation (none exists in the free libraries). For help reading it, choose <b>Interlinear</b> (each word's meaning) or use 🌐 Translate.";
+    if (t.has_en === false && tr !== "inter") msg = `ⓘ This sefer has no English translation. Press <b>🤖 Translate with AI</b> beside a passage, or <a href="#" data-aipage>translate this whole page with AI</a> (a machine translation made on this device by the AI pack; it can have mistakes). <b>Interlinear</b> shows each word's meaning.`;
+    else if (t.jps && tr !== "inter") msg = "ⓘ English: the JPS 1917 translation of the Tanach.";
     else if (t.has_en && tr === "basic" && !t.has_basic) msg = "ⓘ This sefer's translation is not divided into literal words and explanation, so <b>basic</b> shows the full translation.";
     else if (t.has_en && t.en_approx && tr !== "inter") msg = "ⓘ This translation was made for a differently divided text: it is placed beside the Hebrew by length, so it can be a line or two off.";
     return msg ? `<div class="tr-note small">${msg}</div>` : "";
@@ -336,8 +340,28 @@ const Library = {
         chz: async () => { if (!App.pages.chazara) return App.toast("Turn on the Chazara plugin (Plugins screen)", true);
           const r = await App.api("plugin_call", { id: "chazara", fn: "add", args: { ref: p.ref } }); App.toast(r.added ? "Added to Chazara — review it on the Chazara screen" : "Already in Chazara"); },
         copy: () => App.copy(`${p.he || ""}\n${p.en || ""}\n— ${p.ref}`.replace(/\n\n/g, "\n"), `<p dir="rtl">${esc(p.he)}</p><p>${esc(p.en)}</p><p style="color:#8a6d3b">— ${esc(p.ref)}</p>`),
+        aitr: () => this.aiTranslate(p, t, e.target),
         comm: () => { this.view.comm = true; $("#rComm").checked = true; this.layoutPanes(); this.select(p.id, true); } })[act]?.();
     };
+  },
+  /* English made by the AI for a passage that has no translation (kept on this computer, so only made once) */
+  async aiTranslate(p, t, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "🤖 Translating… (a few seconds; the first time the AI starts, up to a minute)"; }
+    try {
+      const r = await App.api("ai_translate", { id: p.id });
+      p.ai_en = r.en;
+      const el = $(`.psg[data-id="${p.id}"]`); if (el) el.outerHTML = this.psgHtml(p, t);
+    } catch (e) { if (btn) { btn.disabled = false; btn.textContent = "🤖 Translate with AI"; } }
+  },
+  async aiTranslatePage() {
+    const t = this.tab(); if (!t) return;
+    for (const p of t.passages) {
+      if (p.en || p.ai_en || !p.he) continue;
+      if (this.tab() !== t) break;
+      const btn = $(`.psg[data-id="${p.id}"] [data-act="aitr"]`);
+      await this.aiTranslate(p, t, btn);
+      if (!p.ai_en) break;
+    }
   },
   select(id, force) {
     this.selected = id; $$(".psg.sel").forEach(x => x.classList.remove("sel")); const el = $(`.psg[data-id="${id}"]`); if (el) el.classList.add("sel");
@@ -372,7 +396,7 @@ const Library = {
       <div id="cBody">` + (local.length ? local.filter(g => !this.commCat || this.commCat === "All" || cat(g) === this.commCat).map(g => {
         const n = g.items.reduce((k, i) => k + i.texts.length, 0);
         return `<details class="comm-group" data-g="${esc(g.title)}" ${open[g.title] === false ? "" : "open"}><summary><span class="cg-he">${esc(g.he_title && g.he_title !== g.title ? g.he_title : "")}</span> <span class="cg-en">${esc(g.title)}</span><span class="spacer"></span><span class="badge">${n}</span></summary>
-        ${g.items.filter(i => i.texts.length).map(i => i.texts.map(x => `<div class="comm-item" data-ref="${esc(x.ref)}">${x.he ? `<div class="he">${esc(this.nk(x.he))}</div>` : ""}${x.en && showEn ? `<div class="en">${esc(x.en)}</div>` : ""}
+        ${g.items.filter(i => i.texts.length).map(i => i.texts.map(x => `<div class="comm-item" data-ref="${esc(x.ref)}">${x.he ? `<div class="he">${esc(this.nk(x.he))}</div>` : ""}${x.en && showEn ? `<div class="en">${esc(x.en)}</div>` : (showEn && x.he ? `<div class="en ai-en"><button class="btn small" data-aic>🤖 Translate with AI</button></div>` : "")}
           <div class="small comm-ref"><a href="#" data-open="${x.id}">${esc(x.ref)} ›</a></div></div>`).join("")).join("")}</details>`; }).join("")
       : `<p class="muted small">No commentaries found for this passage.</p>`)
       + (missing.length ? `<details class="comm-missing"><summary class="small muted">${missing.length} more not in your library</summary><div class="small muted">${missing.map(g => esc(g.title)).join(" · ")}</div><p class="small">Get them: Library → “get the rest”, or Settings → Library.</p></details>` : "") + `</div>`;
@@ -380,6 +404,12 @@ const Library = {
     $$("[data-cc]", el).forEach(b => b.onclick = () => { this.commCat = b.dataset.cc; this.loadConnections(p); });
     $$("details.comm-group", el).forEach(d => d.ontoggle = () => { open[d.dataset.g] = d.open; });
     $("#cAll", el).onclick = () => { const anyClosed = $$("details.comm-group", el).some(d => !d.open); $$("details.comm-group", el).forEach(d => { d.open = anyClosed; open[d.dataset.g] = anyClosed; }); $("#cAll", el).textContent = anyClosed ? "Close all" : "Open all"; };
+    $$("[data-aic]", el).forEach(b => b.onclick = async () => {
+      const it = b.closest(".comm-item"), he = it.querySelector(".he")?.textContent || "";
+      b.disabled = true; b.textContent = "🤖 Translating…";
+      try { const r = await App.api("ai_translate", { text: he }); b.parentElement.innerHTML = `${esc(r.en)}<div class="small muted">🤖 AI translation — may have mistakes</div>`; }
+      catch (e) { b.disabled = false; b.textContent = "🤖 Translate with AI"; }
+    });
     $("#cPrint", el).onclick = () => this.printHtml(`<h2>${esc(p.ref)}</h2>` + $$("details.comm-group", el).filter(d => d.open).map(d => `<h3>${d.querySelector("summary").innerText}</h3>` + $$(".comm-item", d).map(x => x.outerHTML).join("")).join(""), p.ref + " - commentaries");
     $("#cLink", el).onclick = () => this.userLink(p);
     el.style.setProperty("--comm-pane-font", this.fontCss(App.state.settings.comm_pane_font, "regular"));

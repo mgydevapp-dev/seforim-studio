@@ -2,6 +2,7 @@
 LAN share listener that accepts nothing but incoming share packages with a pairing code)."""
 import datetime as dt
 import glob
+import hashlib
 import importlib.util
 import json
 import mimetypes
@@ -10,6 +11,7 @@ import re
 import secrets
 import sys
 import shutil
+import sqlite3
 import threading
 import time
 import traceback
@@ -832,6 +834,7 @@ class App:
             w["has_en"] = bool(self.lib.q1("SELECT 1 x FROM passages WHERE work_id=? AND en<>'' LIMIT 1", (wid,)))
             w["has_basic"] = bool(self.lib.q1("SELECT 1 x FROM passages WHERE work_id=? AND en_basic IS NOT NULL AND en_basic<>'' LIMIT 1", (wid,)))
             w["en_approx"] = "[approx-en]" in (w.get("description") or "")
+            w["jps"] = "[jps1917]" in (w.get("description") or "")
         return {"work": w, "toc": self.lib.toc(a["work_id"])}
 
     def api_lib_chapter(self, a):
@@ -847,7 +850,24 @@ class App:
             n = self.lib.q1("SELECT COUNT(*) n FROM links WHERE ref1=? OR ref2=?", (r["ref"], r["ref"]))["n"]
             if n:
                 links[r["id"]] = n
+        self._attach_ai_en(rows)
         return {"passages": rows, "annotations": {str(k): v for k, v in ann.items()}, "links": {str(k): v for k, v in links.items()}}
+
+    def _attach_ai_en(self, rows):
+        """Passages the AI already translated on this computer show that English again."""
+        need = [r for r in rows if not r.get("en") and r.get("he")]
+        if not need or not os.path.exists(os.path.join(self.data, "ai_translations.sqlite")):
+            return
+        try:
+            db = self._tr_cache()
+            for r in need:
+                t = re.sub(r"[\u0591-\u05C7]", "", H.strip_html(r["he"])).strip()
+                got = db.execute("SELECT en FROM tr WHERE key=?", (hashlib.sha1(t.encode("utf-8")).hexdigest(),)).fetchone()
+                if got:
+                    r["ai_en"] = got[0]
+            db.close()
+        except sqlite3.Error:
+            pass
 
     def api_find_ref(self, a):
         return self.lib.find_ref(a["ref"])
@@ -1106,6 +1126,43 @@ class App:
             self._lang = LangData([os.path.join(self.base, "langdata", "lang.sqlite"), os.path.join(self.shared, "lang.sqlite"),
                                    os.path.join(os.path.dirname(self.base), "langdata", "lang.sqlite")])
         return self._lang
+
+    _tr_lock = threading.Lock()
+
+    def _tr_cache(self):
+        db = sqlite3.connect(os.path.join(self.data, "ai_translations.sqlite"), timeout=30)
+        db.execute("CREATE TABLE IF NOT EXISTS tr(key TEXT PRIMARY KEY, en TEXT, at REAL)")
+        return db
+
+    def api_ai_translate(self, a):
+        """English for a passage that has none, made by the AI (a machine translation; kept so it is made only once)."""
+        from scanner import engines
+        text = (a.get("text") or "").strip()
+        if a.get("id") and not text:
+            r = self.lib.q("SELECT he FROM passages WHERE id=?", (int(a["id"]),))
+            text = H.strip_html(r[0]["he"]) if r else ""
+        text = re.sub(r"[\u0591-\u05C7]", "", text).strip()
+        if not text:
+            raise ValueError("Nothing to translate")
+        key = hashlib.sha1(text.encode("utf-8")).hexdigest()
+        db = self._tr_cache()
+        try:
+            got = db.execute("SELECT en FROM tr WHERE key=?", (key,)).fetchone()
+            if got and not a.get("again"):
+                return {"en": got[0], "cached": True}
+            if not self._ai_ready():
+                if not self.bundled_ollama() or not self.start_bundled_ollama(wait=180):
+                    raise ValueError("The AI is not installed or not running. Install the AI pack in the Scanner section "
+                                     "(on a computer the 8B AI gives the best translations).")
+            with self._tr_lock:
+                en = engines.OllamaEngine().translate_text(text[:6000])
+            if not en:
+                raise ValueError("The AI gave no translation - try again.")
+            db.execute("INSERT OR REPLACE INTO tr(key, en, at) VALUES(?,?,?)", (key, en, time.time()))
+            db.commit()
+            return {"en": en, "cached": False}
+        finally:
+            db.close()
 
     def api_translate(self, a):
         from .langdata import is_hebrew, key

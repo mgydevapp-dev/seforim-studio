@@ -439,3 +439,6 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
   .cover-form { width: auto !important; }
 }
 #mBooks { display: none; }
+
+.ai-en .btn { opacity: .75; }
+.psg:hover .ai-en .btn, .psg.sel .ai-en .btn { opacity: 1; }

@@ -380,15 +380,6 @@ def detect_cites(a, ctx=None):
     return table(["Found", "Reference", "Status"], rows) if rows else "No citations found"
 
 
-@tool("Text analysis", "Sefaria link for a reference", "Makes a web link anyone can open (Genesis 1:1 → sefaria.org/Genesis.1.1).", [{"name": "text", "label": "Reference", "type": T}])
-def sefaria_link(a, ctx=None):
-    r = _txt(a).strip()
-    m = re.match(r"^(.*?)\s+([\dab:\-]+)$", r)
-    path = (m.group(1).replace(" ", "_") + "." + m.group(2).replace(":", ".")) if m else r.replace(" ", "_")
-    return "https://www.sefaria.org/" + urllib.parse.quote(path, safe="._-")
-
-
-# ======================================================================== CALENDAR
 @tool("Calendar", "Today's Hebrew date", "Hebrew and English date for today, with holidays, omer and daf yomi.", [])
 def today(a, ctx=None):
     d = dt.date.today(); y, m, dd = C.greg_to_heb(d)

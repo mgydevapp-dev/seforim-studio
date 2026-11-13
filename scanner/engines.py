@@ -209,7 +209,7 @@ class OllamaEngine:
         b2["messages"] = [dict(body["messages"][0], content="/no_think\n" + body["messages"][0]["content"])]
         tries.append(("chat", b2))
         g = {"model": body["model"], "stream": False, "think": False, "keep_alive": body.get("keep_alive"), "options": body["options"],
-             "prompt": body["messages"][0]["content"], "images": body["messages"][0]["images"]}
+             "prompt": body["messages"][0]["content"], "images": body["messages"][0].get("images") or []}
         tries.append(("generate", g))
         last = ""
         for kind, b in tries:
@@ -228,6 +228,25 @@ class OllamaEngine:
             last = f"{kind}: empty answer (done_reason={out.get('done_reason')}, thinking {len(thinking)} chars)"
         print("AI gave no text:", last, flush=True)
         raise RuntimeError("The AI gave no text for this page (" + last + "). Try 'Unclear / messy' or the Tesseract reader.")
+
+    TRANSLATE_PROMPT = ("Translate this passage from a Jewish sefer (Hebrew or Aramaic, e.g. Gemara, Rashi, Tosafos, halacha) "
+                        "into clear, accurate English. Keep names and terms in the usual English transliteration "
+                        "(Rabbi Yochanan, Shema, terumah), translate every sentence, add nothing, and output only the "
+                        "English.\n\n")
+
+    def translate_text(self, text, progress=None):
+        """Hebrew/Aramaic -> English with the same AI (text only, no picture)."""
+        model = self.pick_model()
+        if not model:
+            raise RuntimeError("The AI is not installed or not running - install the AI pack in the Scanner first.")
+        body = {"model": model, "stream": False, "keep_alive": "60m", "think": False,
+                "options": {"temperature": 0.1, "top_p": 0.9, "num_ctx": 4096, "num_predict": 1500,
+                            "num_thread": max(1, (os.cpu_count() or 4)), "repeat_penalty": 1.05},
+                "messages": [{"role": "user", "content": self.TRANSLATE_PROMPT + text}]}
+        out = self._ask(body, progress)
+        if "</think>" in out:
+            out = out.split("</think>", 1)[1]
+        return out.strip()
 
     def warm_up(self):
         """Load the AI model into memory in the background when the app starts, so the first page is read quickly."""

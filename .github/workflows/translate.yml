@@ -1,23 +1,81 @@
-# Offline English translation of the library (no Sefaria): JPS 1917 for Tanach + OPUS-MT machine translation.
-name: Translate library
+# The library without Sefaria: takes the published Otzaria library, removes every Sefaria-made translation,
+# adds the JPS 1917 English Tanach, checks it, and publishes it again. Runs when a commit message has [libnosefaria].
+name: Library without Sefaria
 on:
   push:
     branches: [main]
-    paths: [".github/workflows/translate.yml", "tools/mt_speed.py"]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  speed:
+  rebuild:
+    if: contains(github.event.head_commit.message, '[libnosefaria]') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 240
     steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: |
-          pip install -q ctranslate2 transformers sentencepiece sacremoses torch --extra-index-url https://download.pytorch.org/whl/cpu
-          for m in Helsinki-NLP/opus-mt-tc-big-he-en; do
-            ct2-transformers-converter --model $m --output_dir ct2_${m##*/} --quantization int8 || echo "no $m"
+      - name: Get the current library
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          mkdir -p dl build
+          gh release download latest -p 'SeforimLibrary.sqlite.xz.part*' -D dl
+          ls -la dl
+          cat $(ls dl/SeforimLibrary.sqlite.xz.part* | sort -V) | xz -d -T0 > build/library.sqlite
+          rm -rf dl; ls -la build
+      - name: Get the JPS 1917 Tanach (public domain, ebible.org)
+        run: |
+          curl -fsSL -o jps.zip https://ebible.org/Scriptures/engjps_vpl.zip
+          unzip -o -q jps.zip -d jps; ls jps
+          f=$(ls jps/*vpl*.txt | head -1); head -3 "$f"; cp "$f" engjps_vpl.txt
+      - name: Rashi, Tosafos and the commentaries in the library
+        run: |
+          python - <<'P' | tee build/library_report.txt
+          import sqlite3
+          c = sqlite3.connect("build/library.sqlite")
+          print("seforim:", c.execute("select count(*) from works").fetchone()[0])
+          print("passages:", c.execute("select count(*) from passages").fetchone()[0], " links:", c.execute("select count(*) from links").fetchone()[0])
+          for pat in ('רש"י על%', 'תוספות על%', 'רמב"ן על%', 'מהרש"א%', 'ר"ן על%', 'רא"ש על%', 'שטיינזלץ%'):
+              n = c.execute("select count(*), coalesce(sum(n_passages),0) from works where he_title like ?", (pat,)).fetchone()
+              print(f"{pat:16} {n[0]} seforim, {n[1]} passages")
+          print([r[0] for r in c.execute("select he_title from works where he_title like '%ברכות%' limit 40")])
+          print("links on Berakhot 2a:", c.execute("select count(*) from links where ref1 like 'Berakhot 2a:%' or ref2 like 'Berakhot 2a:%'").fetchone()[0])
+          P
+      - name: Remove the Sefaria translations, add JPS
+        run: |
+          python tools/translate_library.py apply --lib build/library.sqlite --jps engjps_vpl.txt | tail -50 | tee -a build/library_report.txt
+          python - <<'P' | tee -a build/library_report.txt
+          import sqlite3
+          c = sqlite3.connect("build/library.sqlite")
+          print("passages with English now:", c.execute("select count(*) from passages where en<>''").fetchone()[0])
+          for r in c.execute("select ref, substr(en,1,80) from passages where ref in ('Genesis 1:1','Psalms 23:1','Isaiah 40:1')"):
+              print(r)
+          n = c.execute("select count(*) from works").fetchone()[0]
+          assert n > 5000, n
+          assert c.execute("select count(*) from passages where ref='Genesis 1:1' and en<>''").fetchone()[0], "no JPS on Genesis 1:1"
+          assert c.execute("select count(*) from fts_en").fetchone() is not None
+          P
+          sqlite3 build/library.sqlite "PRAGMA integrity_check;" | head -3 || python -c "import sqlite3;print(sqlite3.connect('build/library.sqlite').execute('pragma quick_check').fetchone())"
+          python -c "import sqlite3;c=sqlite3.connect('build/library.sqlite');c.execute('VACUUM');c.close()"
+          ls -la build
+      - name: Compress and split
+        run: |
+          cd build
+          xz -T0 -6 -c library.sqlite > SeforimLibrary.sqlite.xz && rm library.sqlite
+          split -b 1900M -d -a 1 SeforimLibrary.sqlite.xz part_ && rm SeforimLibrary.sqlite.xz
+          n=$(ls part_* | wc -l); i=1
+          for f in $(ls part_* | sort); do mv "$f" "SeforimLibrary.sqlite.xz.part${i}of${n}"; i=$((i+1)); done
+          cat SeforimLibrary.sqlite.xz.part* | xz -t && echo "archive OK"
+          ls -la
+      - name: Publish (release "latest")
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release upload latest build/SeforimLibrary.sqlite.xz.part* build/library_report.txt --clobber
+          for a in $(gh release view latest --json assets -q '.assets[].name' | grep -E '^SeforimLibrary' || true); do
+            [ -f "build/$a" ] || gh release delete-asset latest "$a" -y
           done
-          du -sh ct2_* || true
-          python tools/mt_speed.py Helsinki-NLP/opus-mt-tc-big-he-en
