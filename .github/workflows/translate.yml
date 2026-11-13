@@ -16,8 +16,8 @@ jobs:
         with: { python-version: "3.12" }
       - run: |
           pip install -q ctranslate2 transformers sentencepiece sacremoses torch --extra-index-url https://download.pytorch.org/whl/cpu
-          for m in Helsinki-NLP/opus-mt-he-en Helsinki-NLP/opus-mt-tc-big-he-en; do
+          for m in Helsinki-NLP/opus-mt-tc-big-he-en; do
             ct2-transformers-converter --model $m --output_dir ct2_${m##*/} --quantization int8 || echo "no $m"
           done
           du -sh ct2_* || true
-          python tools/mt_speed.py Helsinki-NLP/opus-mt-he-en Helsinki-NLP/opus-mt-tc-big-he-en
+          python tools/mt_speed.py Helsinki-NLP/opus-mt-tc-big-he-en
