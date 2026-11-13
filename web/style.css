@@ -429,5 +429,13 @@ details.comm-group .comm-item .en { margin-top: 3px; color: var(--ink); opacity:
   .ed-side { width: auto !important; border-left: 0; border-top: 1px solid var(--line); }
   .img-pane { width: auto !important; }
   .ed-toolbar { overflow-x: auto; }
+  .page > *, .card, .grid > *, .searchbox, .page .row > * { min-width: 0; max-width: 100%; }
+  .page-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .searchbox, .page .row { flex-wrap: wrap; }
+  .page code, .page .small { overflow-wrap: anywhere; }
+  .page input:not([type=checkbox]):not([type=radio]):not([type=range]), .page select { max-width: 100%; }
+  .seg { flex-wrap: wrap; }
+  .cover-wrap { flex-direction: column; }
+  .cover-form { width: auto !important; }
 }
 #mBooks { display: none; }

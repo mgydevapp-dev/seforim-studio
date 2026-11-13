@@ -118,7 +118,7 @@ if page:
                 report.append(f"   ⚠ wider than the phone on {pid_}: {wide}")
         except Exception as e:  # noqa
             note(False, f"screen {pid_}: {e}")
-    for name, args in [("status", {}), ("gematria", {"text": "שלום"}), ("ai_status", {}), ("library_health", {})]:
+    for name, args in [("status", {}), ("gematria_value", {"text": "שלום"}), ("ai_status", {}), ("library_health", {})]:
         r = api(name, args)
         note(not r.startswith('{"error"'), f"api {name}: {r[:250]}")
     page.js("App.show('home')")
