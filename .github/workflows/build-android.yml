@@ -79,7 +79,7 @@ jobs:
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install -q playwright
+      - run: pip install -q websocket-client
       - name: Test the APK on an Android phone emulator
         id: test
         continue-on-error: true
