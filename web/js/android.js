@@ -109,7 +109,7 @@
       const li = hl.install || {}, aiRun = ai.state === "running", libRun = li.state === "running";
       const step = (ok, run, prog, msg) => ok ? `<span class="badge good">✅ Installed</span>` : run
         ? `<div class="progress" style="height:12px;margin:6px 0"><div style="width:${prog || 0}%"></div></div><div class="small">${esc(msg || "Installing…")} ${Math.round(prog || 0)}% — keep the app open</div>`
-        : `<div class="small muted">${esc(msg || "Not installed yet")}</div>`;
+        : `<div class="small muted">${esc(!msg || /Looked in|Download the|onto this phone|not found/i.test(msg) ? "Not installed yet." : msg)}</div>`;
       el.innerHTML = `<h1 class="page-title">📥 Install seforim & AI</h1>
         <p class="small">Download the files on this phone (or copy them from a computer), then load them here. Everything works offline afterwards.
           Big files are kept on: <b>${esc(cur.name || "")}</b>${cur.free != null ? ` (${gb(cur.free)} free)` : ""} — <a href="#" id="inWhere">change (phone / SD card)</a></p>
