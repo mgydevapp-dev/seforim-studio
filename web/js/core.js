@@ -117,7 +117,7 @@ const App = {
   },
   buildRail() {
     const r = $("#rail"); r.innerHTML = "";
-    const CORE = ["home", "library", "search", "translate", "gematria", "roshei", "analysis", "tools", "calendar", "notes", "mylib", "cover", "scanner", "share"];
+    const CORE = ["home", "install", "library", "search", "translate", "gematria", "roshei", "analysis", "tools", "calendar", "notes", "mylib", "cover", "scanner", "share"];
     const core = this.order.filter(i => CORE.includes(i));
     const addons = this.order.filter(i => !CORE.includes(i) && i !== "plugins" && i !== "settings");
     const add = id => { const p = this.pages[id]; if (!p) return;

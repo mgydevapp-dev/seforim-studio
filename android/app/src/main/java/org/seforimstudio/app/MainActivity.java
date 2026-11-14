@@ -361,6 +361,7 @@ public class MainActivity extends Activity {
         /** Pick downloaded files (library / AI parts) with the phone's file picker and copy them into a folder. */
         @JavascriptInterface public void importFiles(String dest) {
             importDest = dest;
+            setImport("waiting", 0, 0, "Choose the files…");
             ui.post(() -> {
                 Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -457,9 +458,10 @@ public class MainActivity extends Activity {
             }
             if (fileCb != null) fileCb.onReceiveValue(out);
             fileCb = null;
-        } else if (req == REQ_IMPORT && res == RESULT_OK) {
+        } else if (req == REQ_IMPORT) {
             List<Uri> l = uris(data);
-            new Thread(() -> copyImports(l, importDest)).start();
+            if (res != RESULT_OK || l.isEmpty()) setImport("cancelled", 0, 0, "No files chosen.");
+            else new Thread(() -> copyImports(l, importDest)).start();
         }
     }
 
