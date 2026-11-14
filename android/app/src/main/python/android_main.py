@@ -1,12 +1,12 @@
 """Seforim Studio on Android: start the same engine as the Windows app (core/server.py) inside the phone app.
-MainActivity.java calls start(config_json) and then shows http://127.0.0.1:<port>/ in a WebView."""
+MainActivity.java calls start(config_json); the WebView then sends every request to handle() - no server, no network."""
+import io
 import json
 import os
 import shutil
 import sys
 import threading
 
-PORT = 48765  # fixed, so the pages keep their settings (they are remembered per address)
 
 
 class _Tee:
@@ -68,11 +68,43 @@ def start(cfg_json):
             shutil.copyfile(bundled, target)
         except OSError as e:
             print("catalog copy:", e)
-    from core.server import App, serve
+    from core.server import App, make_handler
     app = App(app_dir, data, shared)
+    globals()["_app"], globals()["_handler"] = app, make_handler(app)
+    print("Seforim Studio (Android) ready - no server, the pages talk to the engine directly", flush=True)
+    return 0
+
+
+class _Conn:
+    """Stands in for a network connection: the request comes from the app's WebView, the answer goes back to it."""
+
+    def __init__(self, data):
+        self.r, self.out = io.BytesIO(data), bytearray()
+
+    def makefile(self, mode, *a, **k):
+        return self.r
+
+    def sendall(self, b):
+        self.out += b
+
+    def settimeout(self, t):
+        pass
+
+    def setsockopt(self, *a):
+        pass
+
+    def close(self):
+        pass
+
+
+def handle(raw):
+    """One HTTP request (bytes) from the WebView -> the complete HTTP answer (bytes). Same code as the Windows app."""
+    c = _Conn(bytes(raw))
     try:
-        srv = serve(app, PORT)
-    except OSError:
-        srv = serve(app, 0)
-    globals()["_app"], globals()["_srv"] = app, srv
-    return srv.server_address[1]
+        _handler(c, ("127.0.0.1", 0), None)
+    except Exception:  # noqa
+        import traceback
+        traceback.print_exc()
+        if not c.out:
+            return b"HTTP/1.1 500 Error\r\nContent-Type: application/json\r\nContent-Length: 30\r\n\r\n" + b'{"error": "engine error"}     '
+    return bytes(c.out)

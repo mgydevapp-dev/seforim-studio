@@ -81,7 +81,7 @@ while time.time() - t0 < 300 and not page:
             fwd = m.group(1)
             adb("forward", "tcp:9222", "localabstract:" + fwd)
         tabs = json.loads(urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=10).read())
-        app = [t for t in tabs if t.get("url", "").startswith("http://127.0.0.1")]
+        app = [t for t in tabs if t.get("url", "").startswith("https://seforim.local")]
         if app:
             page = CDP(app[0]["webSocketDebuggerUrl"])
             break

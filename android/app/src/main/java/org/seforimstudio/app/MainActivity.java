@@ -26,6 +26,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -46,7 +47,15 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -58,7 +67,13 @@ public class MainActivity extends Activity {
     static final int REQ_CHOOSER = 11, REQ_IMPORT = 12, REQ_PERM = 13;
 
     WebView web;
-    String baseUrl = "";
+    /** The app's pages live at this made-up address; the app answers every request itself (no server, no network). */
+    static final String HOST = "seforim.local", ORIGIN = "https://seforim.local/";
+    String baseUrl = ORIGIN;
+    static PyObject engine;
+    static final CountDownLatch ready = new CountDownLatch(1);
+    static volatile String startError = null;
+    final ExecutorService pool = Executors.newFixedThreadPool(4);
     ValueCallback<Uri[]> fileCb;
     Uri cameraUri;
     String importDest;
@@ -85,9 +100,12 @@ public class MainActivity extends Activity {
         web.addJavascriptInterface(new Bridge(), "SeforimAndroid");
         web.setWebViewClient(new WebViewClient() {
             @Override
+            public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return intercept(r); }
+
+            @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
                 Uri u = r.getUrl();
-                if ("127.0.0.1".equals(u.getHost()) || "about".equals(u.getScheme()) || "data".equals(u.getScheme())) return false;
+                if (HOST.equals(u.getHost()) || "about".equals(u.getScheme()) || "data".equals(u.getScheme())) return false;
                 try { startActivity(new Intent(Intent.ACTION_VIEW, u)); } catch (Exception e) { }
                 return true;  // other web sites open in the phone's browser
             }
@@ -112,16 +130,77 @@ public class MainActivity extends Activity {
             unpackApp(app);
             if (!Python.isStarted()) Python.start(new AndroidPlatform(this));
             PyObject m = Python.getInstance().getModule("android_main");
-            int port = m.callAttr("start", config().toString()).toInt();
-            baseUrl = "http://127.0.0.1:" + port + "/";
-            ui.post(() -> web.loadUrl(baseUrl));
+            m.callAttr("start", config().toString());
+            engine = m;
+            ready.countDown();
+            ui.post(() -> web.loadUrl(ORIGIN));
         } catch (Throwable t) {
             StringWriter sw = new StringWriter();
             t.printStackTrace(new PrintWriter(sw));
             Log.e(TAG, "start failed", t);
+            startError = sw.toString();
+            ready.countDown();
             String msg = android.text.Html.escapeHtml(sw.toString());
             ui.post(() -> web.loadDataWithBaseURL(null, "<html><body style='font-family:sans-serif;padding:16px'><h3>Seforim Studio could not start</h3><pre style='white-space:pre-wrap;font-size:11px'>"
                     + msg + "</pre></body></html>", "text/html", "utf-8", null));
+        }
+    }
+
+    // ------------------------------------------------------------------ answering the pages' requests (instead of a server)
+    /** Hand one request to the Python engine (core/server.py, the same code as on Windows) and get its full answer. */
+    static byte[] ask(String method, String path, Map<String, String> headers, byte[] body) throws Exception {
+        if (!ready.await(180, TimeUnit.SECONDS) || engine == null)
+            throw new Exception(startError != null ? startError : "the app's engine is still starting");
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        StringBuilder h = new StringBuilder(method + " " + path + " HTTP/1.1\r\nHost: " + HOST + "\r\n");
+        if (headers != null) for (Map.Entry<String, String> e : headers.entrySet()) {
+            String k = e.getKey();
+            if (k.equalsIgnoreCase("host") || k.equalsIgnoreCase("content-length") || k.equalsIgnoreCase("connection")) continue;
+            h.append(k).append(": ").append(e.getValue().replace("\r", "").replace("\n", "")).append("\r\n");
+        }
+        h.append("Content-Length: ").append(body == null ? 0 : body.length).append("\r\nConnection: close\r\n\r\n");
+        raw.write(h.toString().getBytes("UTF-8"));
+        if (body != null) raw.write(body);
+        return engine.callAttr("handle", raw.toByteArray()).toJava(byte[].class);
+    }
+
+    /** An HTTP answer split into status, headers and body. */
+    static class Answer {
+        int status = 500; String reason = "Error"; Map<String, String> headers = new HashMap<>(); byte[] body = new byte[0];
+        static Answer parse(byte[] r) throws Exception {
+            Answer a = new Answer();
+            int end = -1;
+            for (int i = 0; i + 3 < r.length; i++)
+                if (r[i] == '\r' && r[i + 1] == '\n' && r[i + 2] == '\r' && r[i + 3] == '\n') { end = i; break; }
+            if (end < 0) return a;
+            String[] lines = new String(r, 0, end, "UTF-8").split("\r\n");
+            String[] st = lines[0].split(" ", 3);
+            a.status = Integer.parseInt(st[1]);
+            a.reason = st.length > 2 && !st[2].isEmpty() ? st[2] : "OK";
+            for (int i = 1; i < lines.length; i++) {
+                int c = lines[i].indexOf(':');
+                if (c > 0) a.headers.put(lines[i].substring(0, c).trim(), lines[i].substring(c + 1).trim());
+            }
+            a.body = java.util.Arrays.copyOfRange(r, end + 4, r.length);
+            return a;
+        }
+        String type() { String t = headers.get("Content-Type"); return t == null ? "application/octet-stream" : t; }
+    }
+
+    WebResourceResponse intercept(WebResourceRequest r) {
+        Uri u = r.getUrl();
+        if (!HOST.equals(u.getHost())) return null;
+        try {
+            String path = u.getEncodedPath() + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : "");
+            Answer a = Answer.parse(ask(r.getMethod(), path, r.getRequestHeaders(), null));
+            String t = a.type(), mime = t.split(";")[0].trim(), enc = t.contains("charset=") ? t.substring(t.indexOf("charset=") + 8).trim() : null;
+            Map<String, String> hs = new HashMap<>(a.headers);
+            hs.remove("Content-Length"); hs.remove("Connection"); hs.remove("Content-Type");
+            return new WebResourceResponse(mime, enc, a.status, a.reason, hs, new ByteArrayInputStream(a.body));
+        } catch (Exception e) {
+            Log.e(TAG, "request " + u, e);
+            byte[] b = ("<pre>" + android.text.Html.escapeHtml(String.valueOf(e.getMessage())) + "</pre>").getBytes();
+            return new WebResourceResponse("text/html", "utf-8", 500, "Error", new HashMap<>(), new ByteArrayInputStream(b));
         }
     }
 
@@ -243,6 +322,28 @@ public class MainActivity extends Activity {
             try { JSONObject c = config(); c.put("all_files", hasAllFiles()); return c.toString(); } catch (Exception e) { return "{}"; }
         }
         @JavascriptInterface public boolean hasAllFiles() { return MainActivity.hasAllFiles(); }
+        /** A request that sends data (POST) - answered by the engine, then handed back to the page. */
+        @JavascriptInterface public void request(int id, String method, String path, String headersJson, String bodyB64) {
+            pool.execute(() -> {
+                String js;
+                try {
+                    Map<String, String> h = new HashMap<>();
+                    JSONObject o = new JSONObject(headersJson == null || headersJson.isEmpty() ? "{}" : headersJson);
+                    for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) { String k = it.next(); h.put(k, o.getString(k)); }
+                    byte[] body = android.util.Base64.decode(bodyB64 == null ? "" : bodyB64, android.util.Base64.DEFAULT);
+                    Answer a = Answer.parse(ask(method, path, h, body));
+                    JSONObject hs = new JSONObject();
+                    for (Map.Entry<String, String> e : a.headers.entrySet()) hs.put(e.getKey(), e.getValue());
+                    js = "__andDone(" + id + "," + a.status + "," + JSONObject.quote(hs.toString()) + ",\""
+                            + android.util.Base64.encodeToString(a.body, android.util.Base64.NO_WRAP) + "\")";
+                } catch (Throwable e) {
+                    Log.e(TAG, "request " + path, e);
+                    js = "__andDone(" + id + ",0," + JSONObject.quote(String.valueOf(e.getMessage())) + ",\"\")";
+                }
+                final String run = js;
+                ui.post(() -> web.evaluateJavascript(run, null));
+            });
+        }
         @JavascriptInterface public void askAllFiles() {
             ui.post(() -> {
                 try {
@@ -306,6 +407,7 @@ public class MainActivity extends Activity {
         printView = new WebView(this);
         printView.getSettings().setJavaScriptEnabled(false);
         printView.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return intercept(r); }
             @Override public void onPageFinished(WebView v, String url) {
                 PrintManager pm = (PrintManager) getSystemService(PRINT_SERVICE);
                 String t = title == null || title.isEmpty() ? "Seforim Studio" : title;
@@ -424,7 +526,11 @@ public class MainActivity extends Activity {
         try {
             String name = android.webkit.URLUtil.guessFileName(url, cd, mime);
             File tmp = new File(getCacheDir(), name);
-            try (InputStream in = new java.net.URL(url).openStream(); OutputStream o = new FileOutputStream(tmp)) { copy(in, o, null, 0); }
+            Uri u = Uri.parse(url);
+            if (HOST.equals(u.getHost())) {
+                Answer a = Answer.parse(ask("GET", u.getEncodedPath() + (u.getEncodedQuery() != null ? "?" + u.getEncodedQuery() : ""), null, null));
+                try (OutputStream o = new FileOutputStream(tmp)) { o.write(a.body); }
+            } else try (InputStream in = new java.net.URL(url).openStream(); OutputStream o = new FileOutputStream(tmp)) { copy(in, o, null, 0); }
             String where = saveToDownloads(tmp.getAbsolutePath(), name, mime);
             tmp.delete();
             ui.post(() -> android.widget.Toast.makeText(this, "Saved: " + where, android.widget.Toast.LENGTH_LONG).show());
