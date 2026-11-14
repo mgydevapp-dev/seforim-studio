@@ -23,8 +23,16 @@ jobs:
         id: cache
         uses: actions/cache@v4
         with: { path: jniLibs, key: llama-android-v1 }
-      - name: Build the AI program (llama.cpp server) for Android phones
+      - name: …or take it from the last good build
+        id: prev
         if: steps.cache.outputs.cache-hit != 'true'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          for R in $(gh run list -R ${{ github.repository }} -w "Build Android app" -L 10 --json databaseId -q '.[].databaseId'); do
+            if gh run download $R -R ${{ github.repository }} -n jniLibs -D jniLibs 2>/dev/null && ls jniLibs/arm64-v8a/libllama_server.so; then echo "ok=1" >> $GITHUB_OUTPUT; break; fi
+          done
+      - name: Build the AI program (llama.cpp server) for Android phones
+        if: steps.cache.outputs.cache-hit != 'true' && steps.prev.outputs.ok != '1'
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp
           cd llama.cpp && git log -1 --format='llama.cpp %h %cd'
@@ -69,6 +77,11 @@ jobs:
           ls -la ../SeforimStudio.apk
       - uses: actions/upload-artifact@v4
         with: { name: apk, path: SeforimStudio.apk }
+      - name: Publish the APK right away (release "android"); the emulator check runs after
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Seforim Studio for Android" --notes "Install SeforimStudio.apk on the phone."
+          gh release upload android SeforimStudio.apk --clobber
 
   emulator:
     needs: apk
