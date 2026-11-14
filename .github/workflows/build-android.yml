@@ -19,7 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Reuse the AI program from an earlier build
+        id: cache
+        uses: actions/cache@v4
+        with: { path: jniLibs, key: llama-android-v1 }
       - name: Build the AI program (llama.cpp server) for Android phones
+        if: steps.cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp
           cd llama.cpp && git log -1 --format='llama.cpp %h %cd'
