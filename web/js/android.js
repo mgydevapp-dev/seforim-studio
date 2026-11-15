@@ -111,23 +111,26 @@
         ? `<div class="progress" style="height:12px;margin:6px 0"><div style="width:${prog || 0}%"></div></div><div class="small">${esc(msg || "Installing…")} ${Math.round(prog || 0)}% — keep the app open</div>`
         : `<div class="small muted">${esc(!msg || /Looked in|Download the|onto this phone|not found/i.test(msg) ? "Not installed yet." : msg)}</div>`;
       el.innerHTML = `<h1 class="page-title">📥 Install seforim & AI</h1>
+        <div class="row" style="gap:8px;margin-bottom:4px"><button class="btn primary" id="inTopLib">📚 Load seforim files</button><button class="btn primary" id="inTopAi">🤖 Load AI files</button></div><div class="small" id="inTopMsg" style="margin-bottom:8px"></div>
         <p class="small">Download the files on this phone (or copy them from a computer), then load them here. Everything works offline afterwards.
           Big files are kept on: <b>${esc(cur.name || "")}</b>${cur.free != null ? ` (${gb(cur.free)} free)` : ""} — <a href="#" id="inWhere">change (phone / SD card)</a></p>
         <div class="card"><h2 style="margin-top:0">📚 Seforim (the library)</h2>
           ${step(libOk, libRun, li.progress, li.message)}
-          ${libOk ? "" : `<ol class="small"><li>Download <b>both</b> files: <a href="#" data-dl="latest/SeforimLibrary.sqlite.xz.part1of2">part 1</a> · <a href="#" data-dl="latest/SeforimLibrary.sqlite.xz.part2of2">part 2</a> (2.3 GB)</li>
+          ${libOk ? `<div class="row" style="gap:6px;margin-top:6px"><button class="btn" id="inLib">📂 Load newer seforim files…</button></div><div class="small" id="inLibMsg"></div>` : `<ol class="small"><li>Download <b>both</b> files: <a href="#" data-dl="latest/SeforimLibrary.sqlite.xz.part1of2">part 1</a> · <a href="#" data-dl="latest/SeforimLibrary.sqlite.xz.part2of2">part 2</a> (2.3 GB)</li>
             <li>Press <b>Load the seforim files</b> and choose both files.</li><li>The app unpacks them (about 12 GB, 10–30 minutes).</li></ol>
           <div class="row" style="gap:6px"><button class="btn primary" id="inLib" ${libRun ? "disabled" : ""}>📂 Load the seforim files…</button>
             ${st.all_files ? `<button class="btn" id="inLibFind" ${libRun ? "disabled" : ""}>🔎 Find them in Download</button>` : ""}</div>
           <div class="small" id="inLibMsg"></div>`}</div>
         <div class="card"><h2 style="margin-top:0">🤖 AI reader (scanner + translations)</h2>
           ${step(aiOk, aiRun, ai.progress, ai.message)}
-          ${aiOk && !aiRun ? "" : `<ol class="small"><li>Download <b>both</b> files: <a href="#" data-dl="android/SeforimAI-android.tar.part1of2">part 1</a> · <a href="#" data-dl="android/SeforimAI-android.tar.part2of2">part 2</a> (3 GB)</li>
+          ${aiOk && !aiRun ? `<div class="row" style="gap:6px;margin-top:6px"><button class="btn" id="inAi">📂 Load AI files again…</button></div><div class="small" id="inAiMsg"></div>` : `<ol class="small"><li>Download <b>both</b> files: <a href="#" data-dl="android/SeforimAI-android.tar.part1of2">part 1</a> · <a href="#" data-dl="android/SeforimAI-android.tar.part2of2">part 2</a> (3 GB)</li>
             <li>Press <b>Load the AI files</b> and choose both files.</li><li>It unpacks and starts (a few minutes). Needs a phone with about 6 GB memory${st.ram_gb ? ` — this phone has ${st.ram_gb} GB` : ""}.</li></ol>
           <div class="row" style="gap:6px"><button class="btn primary" id="inAi" ${aiRun ? "disabled" : ""}>📂 Load the AI files…</button>
             ${st.all_files ? `<button class="btn" id="inAiFind" ${aiRun ? "disabled" : ""}>🔎 Find them in Download</button>` : ""}</div>
           <div class="small" id="inAiMsg"></div>`}</div>
         ${st.all_files ? "" : `<p class="small">Tip: <a href="#" id="inPerm">allow access to files</a> and the app can find downloaded files by itself (no copying).</p>`}`;
+      $("#inTopLib", el).onclick = () => this.load(st.incoming, $("#inLibMsg", el) || $("#inTopMsg", el), () => this.install("lib", st.incoming));
+      $("#inTopAi", el).onclick = () => this.load(st.incoming, $("#inAiMsg", el) || $("#inTopMsg", el), () => this.install("ai", st.incoming));
       $$("[data-dl]", el).forEach(a => a.onclick = e => { e.preventDefault(); AND.openExternal(REL + a.dataset.dl); });
       if ($("#inWhere", el)) $("#inWhere", el).onclick = e => { e.preventDefault(); App.show("settings"); setTimeout(() => { const b = $$("#page-settings .tabs button, #page-settings [data-tab]").find(x => /library/i.test(x.textContent)); if (b) b.click(); }, 300); };
       if ($("#inPerm", el)) $("#inPerm", el).onclick = e => { e.preventDefault(); AND.askAllFiles(); const t = setInterval(() => { if (AND.hasAllFiles()) { clearInterval(t); this.render(el); } }, 1000); setTimeout(() => clearInterval(t), 120e3); };
@@ -144,7 +147,8 @@
       AND.keepAwake(true);
       const t = setInterval(() => {
         let s = {}; try { s = JSON.parse(AND.importStatus()); } catch (e) { }
-        if (out && s.message) out.innerHTML = esc(s.message) + (s.total ? ` <b>${Math.round(100 * s.done / s.total)}%</b>` : "");
+        const o = typeof out === "string" ? ($(out) || $("#inTopMsg")) : out;
+        if (o && s.message) o.innerHTML = esc(s.message) + (s.total ? ` <b>${Math.round(100 * s.done / s.total)}%</b>` : "");
         if (s.state === "done") { clearInterval(t); try { AND.importStatus(); } catch (e) { } then(); }
         if (s.state === "error" || s.state === "cancelled") { clearInterval(t); AND.keepAwake(false); }
       }, 1000);
@@ -159,6 +163,23 @@
       this.render(this.el);
     }
   };
+  // Home: the two buttons are always at the top
+  if (typeof Home !== "undefined") {
+    const hl = Home.load.bind(Home);
+    Home.load = async function (el) {
+      await hl(el);
+      if (!el.querySelector(".and-load")) el.insertAdjacentHTML("afterbegin", `<div class="card and-load" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn primary" data-load="lib">📚 Load seforim files</button><button class="btn primary" data-load="ai">🤖 Load AI files</button></div>`);
+      $$(".and-load [data-load]", el).forEach(b => b.onclick = () => Install.pick(b.dataset.load));
+    };
+  }
+  Install.pick = async function (kind) {
+    App.show("install");
+    const st = await App.api("android_storage").catch(() => ({}));
+    const out = kind === "lib" ? "#inLibMsg" : "#inAiMsg";
+    this.load(st.incoming, out, () => this.install(kind, st.incoming));
+  };
+
   App.register("install", { title: "Install", icon: "📥", render(el) { Install.render(el); }, onShow() { if (Install.el) Install.render(Install.el); } });
   window.Install = Install;
   setTimeout(async () => {  // a phone without the library starts on the Install screen

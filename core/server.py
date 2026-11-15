@@ -277,6 +277,8 @@ class App:
         model, mm = self.android_ai_files()
         if not (exe and model and mm):
             return False
+        sock = os.path.join(android_cfg().get("files") or self.data, "llama.sock")
+        engines.LLAMA_URL = "unix:" + sock  # a file socket: no network, no internet permission needed
         e = engines.LlamaCppEngine()
         if self.ollama_proc and self.ollama_proc.poll() is None:
             if e.models() is not None:
@@ -284,7 +286,11 @@ class App:
         n = os.cpu_count() or 4
         threads = 4 if n >= 8 else max(2, n - 1)  # the fast cores of a phone
         log_path = os.path.join(self.data, "ai_server_log.txt")
-        cmd = [exe, "-m", model, "--mmproj", mm, "--host", "127.0.0.1", "--port", engines.LLAMA_URL.rsplit(":", 1)[1],
+        try:
+            os.remove(sock)
+        except OSError:
+            pass
+        cmd = [exe, "-m", model, "--mmproj", mm, "--host", sock,
                "-c", "4096", "-t", str(threads), "-ngl", "0", "--jinja", "--no-webui", "-np", "1"]
         try:
             log = open(log_path, "w", encoding="utf-8", errors="replace")

@@ -10,6 +10,7 @@ Default order: A if Ollama + a vision model are installed, else B, else C.
 Command line:  python -m scanner.engines page.png [--engine ollama|kraken|tesseract]
 """
 import base64
+import http.client
 import json
 import os
 import re
@@ -321,6 +322,56 @@ ANDROID = bool(os.environ.get("SEFORIM_ANDROID"))
 LLAMA_URL = os.environ.get("SEFORIM_LLAMA_URL") or "http://127.0.0.1:11436"
 
 
+class _UnixHTTP(http.client.HTTPConnection):
+    """HTTP over a file socket (no network at all: needs no internet permission and no filter can block it)."""
+    def __init__(self, path, timeout=60):
+        super().__init__("localhost", timeout=timeout)
+        self.sock_path = path
+
+    def connect(self):
+        import socket
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(self.timeout)
+        s.connect(self.sock_path)
+        self.sock = s
+
+
+class _Resp:
+    def __init__(self, r):
+        self.r, self.status = r, r.status
+
+    def __iter__(self):
+        while True:
+            line = self.r.readline()
+            if not line:
+                return
+            yield line
+
+    def read(self):
+        return self.r.read()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.r.close()
+
+
+def _llama_open(url, body=None, timeout=60):
+    """GET (body None) or POST json to llama-server at url = 'unix:/path/to.sock' or 'http://host:port'."""
+    if url.startswith("unix:"):
+        path, _, rest = url[5:].partition("|")
+        c = _UnixHTTP(path, timeout)
+        c.request("POST" if body is not None else "GET", rest or "/", body=json.dumps(body).encode() if body is not None else None,
+                  headers={"Content-Type": "application/json"})
+        r = c.getresponse()
+        if r.status >= 400:
+            raise urllib.error.HTTPError(url, r.status, r.reason, r.headers, None)
+        return _Resp(r)
+    req = urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None, headers={"Content-Type": "application/json"})
+    return _LOCAL.open(req, timeout=timeout)
+
+
 class LlamaCppEngine(OllamaEngine):
     """Qwen3-VL run by llama.cpp's llama-server (the AI reader inside the Android app).
     Talks the OpenAI-style /v1/chat/completions; takes the same requests as the Ollama engine."""
@@ -330,9 +381,16 @@ class LlamaCppEngine(OllamaEngine):
     def __init__(self, model=None, url=None, timeout=3600):
         self.url, self.timeout, self.model = (url or LLAMA_URL).rstrip("/"), timeout, model
 
+    def _u(self, path):
+        return self.url + ("|" if self.url.startswith("unix:") else "") + path
+
+    def _post(self, path, body):
+        with _llama_open(self._u(path), body, self.timeout) as r:
+            return json.loads(r.read())
+
     def models(self):
         try:
-            with _LOCAL.open(self.url + "/health", timeout=3) as r:
+            with _llama_open(self._u("/health"), None, 3) as r:
                 ok = r.status == 200
         except urllib.error.HTTPError as e:
             return [] if e.code == 503 else None  # 503 = still loading the model
@@ -363,10 +421,8 @@ class LlamaCppEngine(OllamaEngine):
 
     def _stream(self, body, progress=None):
         b = dict(self._openai(body), stream=True)
-        req = urllib.request.Request(self.url + "/v1/chat/completions", data=json.dumps(b).encode(),
-                                     headers={"Content-Type": "application/json"})
         text, last = [], 0
-        with _LOCAL.open(req, timeout=self.timeout) as r:
+        with _llama_open(self._u("/v1/chat/completions"), b, self.timeout) as r:
             for line in r:
                 line = line.strip()
                 if not line.startswith(b"data:"):

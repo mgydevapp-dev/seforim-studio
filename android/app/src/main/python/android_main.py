@@ -49,6 +49,7 @@ def start(cfg_json):
     cfg = json.loads(cfg_json)
     app_dir, files_dir = cfg["app"], cfg["files"]
     os.environ["SEFORIM_ANDROID"] = "1"
+    os.environ["SEFORIM_LLAMA_URL"] = "unix:" + os.path.join(files_dir, "llama.sock")  # the AI: no network at all
     os.environ["SEFORIM_ANDROID_CFG"] = cfg_json
     os.environ.setdefault("HOME", files_dir)
     data = os.path.join(files_dir, "data")
