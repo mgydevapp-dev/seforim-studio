@@ -3,9 +3,16 @@
   const tb = document.getElementById("topbar"); if (!tb) return;
   const b = document.createElement("button"); b.id = "menuBtn"; b.className = "icon-btn"; b.title = "Menu"; b.textContent = "☰";
   tb.prepend(b);
-  b.onclick = e => { e.stopPropagation(); document.body.classList.toggle("rail-open"); };
+  let last = 0;  // a finger tap gives touchend and then click - act on the first only
+  const toggle = e => {
+    e.preventDefault(); e.stopPropagation();
+    const now = Date.now(); if (now - last < 500) return; last = now;
+    document.body.classList.toggle("rail-open");
+  };
+  b.addEventListener("touchend", toggle);
+  b.addEventListener("click", toggle);
   document.addEventListener("click", e => {
-    if (!document.body.classList.contains("rail-open")) return;
+    if (!document.body.classList.contains("rail-open") || Date.now() - last < 500) return;
     if (e.target.closest("#rail button") || !e.target.closest("#rail")) document.body.classList.remove("rail-open");
   });
   // Library on a phone: the list of seforim and the open sefer take turns on the screen

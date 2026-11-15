@@ -135,9 +135,11 @@ if page:
         return True
 
     # the side menu, the way a finger uses it
+    page.js("window.__ev=[];['touchstart','touchend','click','pointerup'].forEach(t=>document.addEventListener(t,e=>__ev.push(t+':'+(e.target.id||e.target.tagName)+':'+document.body.className),true))")
     note(tap("#menuBtn"), "menu button (☰) is there")
     page.shot(os.path.join(OUT, "menu_open.png"))
     st = page.js("(()=>{const r=document.getElementById('rail').getBoundingClientRect(); return {open: document.body.classList.contains('rail-open'), x: r.x, w: r.width, top: (document.elementFromPoint(40, 300)||{}).outerHTML?.slice(0,80), W: innerWidth}})()")
+    report.append("   events: " + str(page.js("__ev")))
     note(st.get("open") and st.get("x", -1) >= 0 and "data-id" in (st.get("top") or ""), "side menu opens and can be touched: " + json.dumps(st))
     tap('#rail button[data-id="library"]')
     page.shot(os.path.join(OUT, "menu_library.png"))
