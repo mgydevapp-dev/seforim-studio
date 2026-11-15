@@ -68,6 +68,11 @@ jobs:
       - name: Build the offline dictionary (Translate page)
         continue-on-error: true
         run: python tools/build_langdata.py --out langdata/lang.sqlite --cache /tmp/langcache
+      - name: Make the pages work on older phones (older Android WebView)
+        run: |
+          npx -y esbuild@0.24.0 web/js/*.js --outdir=web/js --allow-overwrite --target=chrome58 --log-level=warning
+          npx -y esbuild@0.24.0 web/style.css --outfile=web/style.css --allow-overwrite --target=chrome58 --log-level=warning
+          node --check web/js/core.js && grep -c "?\." web/js/core.js || true
       - name: Build the APK
         env:
           APP_VERSION_CODE: ${{ github.run_number }}
