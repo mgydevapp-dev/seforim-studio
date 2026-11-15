@@ -125,6 +125,24 @@ if page:
     time.sleep(1.5)
     page.shot(os.path.join(OUT, "home.png"))
 
+    def tap(sel):
+        r = page.js(f"(()=>{{const e=document.querySelector({json.dumps(sel)}); if(!e) return null; const b=e.getBoundingClientRect(); return [b.x+b.width/2, b.y+b.height/2]}})()")
+        if not r:
+            return False
+        for t in ("touchStart", "touchEnd"):
+            page.call("Input.dispatchTouchEvent", type=t, touchPoints=[] if t == "touchEnd" else [{"x": r[0], "y": r[1]}])
+        time.sleep(1.2)
+        return True
+
+    # the side menu, the way a finger uses it
+    note(tap("#menuBtn"), "menu button (☰) is there")
+    page.shot(os.path.join(OUT, "menu_open.png"))
+    st = page.js("(()=>{const r=document.getElementById('rail').getBoundingClientRect(); return {open: document.body.classList.contains('rail-open'), x: r.x, w: r.width, top: (document.elementFromPoint(40, 300)||{}).outerHTML?.slice(0,80), W: innerWidth}})()")
+    note(st.get("open") and st.get("x", -1) >= 0 and "data-id" in (st.get("top") or ""), "side menu opens and can be touched: " + json.dumps(st))
+    tap('#rail button[data-id="library"]')
+    page.shot(os.path.join(OUT, "menu_library.png"))
+    note(page.js("App.current") == "library", "touching Library in the menu opens it (now on: " + str(page.js("App.current")) + ")")
+
 log = adb("logcat", "-d", "-s", "python.stdout:*", "python.stderr:*", "SeforimStudio:*", "AndroidRuntime:E")
 open(os.path.join(OUT, "logcat.txt"), "w").write(log)
 open(os.path.join(OUT, "report.md"), "w").write("\n".join(report) + f"\n\n{len(failed)} problem(s)\n")
